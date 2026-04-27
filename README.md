@@ -1,115 +1,115 @@
-# PAN 2026 – Generated Plagiarism Detection
+# PAN 2026 – 生成式剽窃检测
 
-A complete system for the [PAN 2026 shared task on Generated Plagiarism Detection](https://pan.webis.de/clef26/pan26-web/generated-plagiarism-detection.html).
+本项目是 [PAN 2026 生成式剽窃检测共享任务](https://pan.webis.de/clef26/pan26-web/generated-plagiarism-detection.html) 的完整系统实现。
 
-Given a text document (optionally paired with a source document), the system predicts whether it was **written by a human** (label `0`) or **AI-generated / AI-rewritten** (label `1`).
+给定一篇文本（可选地与原始文档配对），系统将预测该文本是**人类撰写**（标签 `0`）还是**由 AI 生成 / AI 改写**（标签 `1`）。
 
 ---
 
-## Repository structure
+## 项目结构
 
 ```
 .
 ├── data/
-│   ├── raw/          ← place downloaded PAN corpora here
-│   └── processed/    ← pre-processed / cached features
+│   ├── raw/          ← 存放下载的 PAN 语料库
+│   └── processed/    ← 预处理 / 缓存的特征
 ├── notebooks/
 │   └── 01_exploratory.ipynb
-├── results/          ← model checkpoints and prediction outputs
+├── results/          ← 模型检查点与预测输出
 ├── src/
-│   ├── data_loader.py           ← load / save JSONL corpora
-│   ├── evaluate.py              ← metrics (F1-macro, AUC-ROC, …)
+│   ├── data_loader.py           ← 加载 / 保存 JSONL 语料库
+│   ├── evaluate.py              ← 评估指标（F1-macro、AUC-ROC 等）
 │   ├── features/
-│   │   ├── perplexity.py        ← GPT-2 perplexity & LLR features
-│   │   ├── stylometric.py       ← TTR, sentence-length stats, etc.
-│   │   └── embeddings.py        ← sentence-transformer features
+│   │   ├── perplexity.py        ← GPT-2 困惑度与 LLR 特征
+│   │   ├── stylometric.py       ← TTR、句子长度统计等文体特征
+│   │   └── embeddings.py        ← 句子 Transformer 嵌入特征
 │   └── models/
-│       ├── zero_shot.py         ← PerplexityThreshold, LLR, RoBERTa detectors
-│       ├── classifier.py        ← FineTunedClassifier (DeBERTa) + FeatureClassifier (GBM)
-│       └── ensemble.py          ← WeightedAverage & Stacking ensembles
-├── train.py          ← training CLI
-├── predict.py        ← inference CLI
-├── Dockerfile        ← TIRA / PAN submission container
+│       ├── zero_shot.py         ← 困惑度阈值、LLR、RoBERTa 检测器
+│       ├── classifier.py        ← FineTunedClassifier（DeBERTa）+ FeatureClassifier（GBM）
+│       └── ensemble.py          ← 加权平均集成与 Stacking 集成
+├── train.py          ← 训练命令行入口
+├── predict.py        ← 推理命令行入口
+├── Dockerfile        ← TIRA / PAN 提交容器
 └── requirements.txt
 ```
 
 ---
 
-## Quick start
+## 快速开始
 
-### 1. Install dependencies
+### 1. 安装依赖
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Download the PAN 2026 corpus
+### 2. 下载 PAN 2026 语料库
 
-Register at https://pan.webis.de/clef26/pan26-web/generated-plagiarism-detection.html,
-download the corpus, and place it in `data/raw/`:
+请在 https://pan.webis.de/clef26/pan26-web/generated-plagiarism-detection.html 注册并下载语料库，
+将其放入 `data/raw/`：
 
 ```
 data/raw/train.jsonl
 data/raw/dev.jsonl
-data/raw/test.jsonl   ← labels omitted
+data/raw/test.jsonl   ← 测试集不含标签
 ```
 
-Expected JSONL schema (one JSON object per line):
+期望的 JSONL 格式（每行一个 JSON 对象）：
 
 ```jsonc
 {"id": "doc001", "text": "...", "label": 1}
 {"id": "doc002", "text": "...", "source_text": "...", "label": 0}
 ```
 
-### 3. Explore the data
+### 3. 数据探索
 
 ```bash
 jupyter notebook notebooks/01_exploratory.ipynb
 ```
 
-### 4. Train a model
+### 4. 训练模型
 
-**Zero-shot baseline** (no training data required):
+**零样本基线**（无需训练数据）：
 ```bash
 python train.py --train data/raw/train.jsonl --mode zeroshot \
     --output results/zeroshot_config.json
 ```
 
-**Feature-based classifier** (fast, CPU-friendly):
+**特征分类器**（速度快，适合 CPU）：
 ```bash
 python train.py --train data/raw/train.jsonl --dev data/raw/dev.jsonl \
     --mode features --output results/feature_clf.joblib
 ```
 
-**Fine-tune DeBERTa** (requires GPU):
+**微调 DeBERTa**（需要 GPU）：
 ```bash
 python train.py --train data/raw/train.jsonl --dev data/raw/dev.jsonl \
     --mode finetune --model microsoft/deberta-v3-base \
     --output results/deberta_model --epochs 3 --batch-size 8
 ```
 
-### 5. Generate predictions
+### 5. 生成预测
 
 ```bash
-# Zero-shot
+# 零样本模式
 python predict.py --input data/raw/test.jsonl --mode zeroshot \
     --threshold 50.0 --output results/predictions.jsonl
 
-# Feature classifier
+# 特征分类器
 python predict.py --input data/raw/test.jsonl --mode features \
     --model results/feature_clf.joblib --output results/predictions.jsonl
 
-# Fine-tuned DeBERTa
+# 微调后的 DeBERTa
 python predict.py --input data/raw/test.jsonl --mode finetune \
     --model results/deberta_model --output results/predictions.jsonl
 
-# RoBERTa zero-shot detector
+# RoBERTa 零样本检测器
 python predict.py --input data/raw/test.jsonl --mode roberta \
     --output results/predictions.jsonl
 ```
 
-Output format (JSONL):
+输出格式（JSONL）：
 ```jsonc
 {"id": "doc001", "score": 0.87, "label": 1}
 {"id": "doc002", "score": 0.12, "label": 0}
@@ -117,32 +117,32 @@ Output format (JSONL):
 
 ---
 
-## Detectors & models
+## 检测器与模型
 
-| Mode | Class | Description |
-|------|-------|-------------|
-| `zeroshot` | `PerplexityThresholdDetector` | GPT-2 perplexity threshold |
-| `zeroshot` | `LLRDetector` | Log-likelihood ratio (DetectGPT-style) |
+| 模式 | 类名 | 说明 |
+|------|------|------|
+| `zeroshot` | `PerplexityThresholdDetector` | GPT-2 困惑度阈值检测器 |
+| `zeroshot` | `LLRDetector` | 对数似然比检测器（DetectGPT 风格）|
 | `roberta` | `RobertaDetector` | `openai-community/roberta-base-openai-detector` |
-| `features` | `FeatureClassifier` | Gradient Boosting on stylometric + embedding features |
-| `finetune` | `FineTunedClassifier` | DeBERTa-v3-base fine-tuned for sequence classification |
-| ensemble | `WeightedAverageEnsemble` | Weighted combination of any detectors |
-| ensemble | `StackingEnsemble` | Logistic-regression meta-learner on detector scores |
+| `features` | `FeatureClassifier` | 基于文体特征 + 嵌入特征的梯度提升分类器 |
+| `finetune` | `FineTunedClassifier` | 微调 DeBERTa-v3-base 序列分类模型 |
+| ensemble | `WeightedAverageEnsemble` | 多检测器加权平均集成 |
+| ensemble | `StackingEnsemble` | 以逻辑回归为元学习器的 Stacking 集成 |
 
-### Features
+### 特征说明
 
-| Module | Features |
-|--------|----------|
-| `perplexity.py` | Perplexity, mean log-likelihood, LLR, burstiness, entropy |
-| `stylometric.py` | TTR, CTTR, mean/std sentence & word length, punctuation density, hapax ratio, function-word ratio, sentence-length burstiness |
-| `embeddings.py` | Document embedding (768-d), intra-document self-similarity, source–suspicious cosine similarity |
+| 模块 | 特征 |
+|------|------|
+| `perplexity.py` | 困惑度、平均对数似然、LLR、突发性、熵 |
+| `stylometric.py` | TTR、CTTR、句子 / 词语长度均值与标准差、标点密度、Hapax 比率、功能词比率、句长突发性 |
+| `embeddings.py` | 文档嵌入向量（768 维）、文档内句子自相似度、原文-可疑文余弦相似度 |
 
 ---
 
-## Evaluation metrics
+## 评估指标
 
-Primary metric: **macro-F1** (mirrors PAN official evaluation).  
-Additional: accuracy, per-class F1, AUC-ROC, average precision.
+主要指标：**宏平均 F1**（与 PAN 官方评估一致）。  
+附加指标：准确率、各类别 F1、AUC-ROC、平均精度。
 
 ```python
 from src.evaluate import compute_metrics, print_report
@@ -153,13 +153,13 @@ print_report(y_true, y_pred, y_score)
 
 ---
 
-## Docker / TIRA submission
+## Docker / TIRA 提交
 
 ```bash
-# Build the image
+# 构建镜像
 docker build -t pan26-generated-plagiarism .
 
-# Run locally (zeroshot mode)
+# 本地运行（零样本模式）
 docker run --rm \
   -v $(pwd)/data/raw:/input \
   -v $(pwd)/results:/output \
@@ -167,7 +167,7 @@ docker run --rm \
   -e PPL_THRESHOLD=50.0 \
   pan26-generated-plagiarism
 
-# Run with a fine-tuned model
+# 使用微调模型运行
 docker run --rm \
   -v $(pwd)/data/raw:/input \
   -v $(pwd)/results/deberta_model:/model \
@@ -179,7 +179,6 @@ docker run --rm \
 
 ---
 
-## Citation
+## 引用
 
-If you use this code, please cite the PAN 2026 overview paper (to be published)
-and the relevant shared-task description.
+如果您使用了本代码，请引用 PAN 2026 任务综述论文（待发表）及相关共享任务描述。

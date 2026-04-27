@@ -1,17 +1,18 @@
 """
 zero_shot.py
 ------------
-Zero-shot AI-generated text detectors based on unsupervised signals.
+基于无监督信号的零样本 AI 生成文本检测器。
 
-Detectors
-~~~~~~~~~
-* **PerplexityThresholdDetector** – thresholds GPT-2 perplexity.  AI text
-  tends to have *lower* perplexity (more predictable), so a low perplexity
-  triggers an AI prediction.
-* **LLRDetector** – uses the log-likelihood ratio between a scoring model and
-  a reference model (DetectGPT-style).  Large positive LLR suggests AI text.
-* **RobertaDetector** – wraps the ``openai-community/roberta-base-openai-detector``
-  (or compatible) model for zero-shot classification.
+检测器说明
+~~~~~~~~~~
+* **PerplexityThresholdDetector** —— 以 GPT-2 困惑度为阈值。
+  AI 文本倾向于具有*更低*困惑度（更可预测），
+  因此低困惑度将触发 AI 预测。
+* **LLRDetector** —— 使用评分模型与参考模型之间的
+  对数似然比（DetectGPT 风格）。
+  较大的正 LLR 值表明文本为 AI 生成。
+* **RobertaDetector** —— 封装 ``openai-community/roberta-base-openai-detector``
+  （或兼容模型）进行零样本分类。
 """
 
 from __future__ import annotations
@@ -26,20 +27,19 @@ from ..features.perplexity import PerplexityFeatures
 
 
 class PerplexityThresholdDetector:
-    """Zero-shot detector: classify as AI-generated if perplexity < threshold.
+    """零样本检测器：困惑度低于阈值时判定为 AI 生成。
 
-    Parameters
-    ----------
+    参数
+    ----
     threshold:
-        Perplexity threshold.  Documents with perplexity below this value are
-        classified as AI-generated (score = 1 − perplexity/threshold, clipped
-        to [0, 1]).
+        困惑度阈值。困惑度低于此值的文档将被判定为 AI 生成
+        （得分 = 1 − 困惑度/阈值，截断至 [0, 1]）。
     scoring_model_name:
-        Causal LM used to compute perplexity.
+        用于计算困惑度的因果语言模型。
     reference_model_name:
-        Reference LM for log-likelihood ratio computation.
+        用于对数似然比计算的参考语言模型。
     device:
-        Torch device.
+        Torch 设备。
     """
 
     def __init__(
@@ -57,16 +57,16 @@ class PerplexityThresholdDetector:
         )
 
     def predict(self, texts: List[str]) -> List[dict]:
-        """Return prediction dicts with keys ``id`` (empty), ``score``, ``label``.
+        """返回包含 ``id``（空）、``score``、``label`` 键的预测字典列表。
 
-        Parameters
-        ----------
+        参数
+        ----
         texts:
-            Raw text strings.
+            原始文本字符串列表。
 
-        Returns
-        -------
-        List of dicts ``{"score": float, "label": int}``.
+        返回
+        ----
+        字典列表，格式为 ``{"score": float, "label": int}``。
         """
         results = []
         for text in texts:
@@ -75,23 +75,22 @@ class PerplexityThresholdDetector:
             if np.isnan(ppl):
                 score = 0.5
             else:
-                # Score ∈ [0, 1]: higher → more likely AI-generated
+                # 得分 ∈ [0, 1]：越高越可能为 AI 生成
                 score = float(np.clip(1.0 - ppl / self.threshold, 0.0, 1.0))
             results.append({"score": score, "label": int(score >= 0.5)})
         return results
 
 
 class LLRDetector:
-    """Zero-shot detector using the log-likelihood ratio (DetectGPT-style).
+    """使用对数似然比的零样本检测器（DetectGPT 风格）。
 
-    A large positive LLR (scoring model assigns higher log-likelihood than
-    the reference model) indicates the text is more ``in-distribution'' for
-    the scoring (larger, instruction-tuned) LM, suggesting AI generation.
+    较大的正 LLR（评分模型对文本赋予更高对数似然）表明该文本更符合
+    评分（更大、经指令调优）语言模型的分布，提示文本为 AI 生成。
 
-    Parameters
-    ----------
+    参数
+    ----
     llr_threshold:
-        LLR value above which text is classified as AI-generated.
+        高于此 LLR 值时，文本被判定为 AI 生成。
     """
 
     def __init__(
@@ -109,7 +108,7 @@ class LLRDetector:
         )
 
     def predict(self, texts: List[str]) -> List[dict]:
-        """Return prediction dicts with keys ``score`` and ``label``."""
+        """返回包含 ``score`` 和 ``label`` 键的预测字典列表。"""
         results = []
         for text in texts:
             feats = self._ppl.extract(text)
@@ -117,29 +116,29 @@ class LLRDetector:
             if np.isnan(llr):
                 score = 0.5
             else:
-                # Sigmoid to map LLR to [0, 1]
+                # Sigmoid 将 LLR 映射到 [0, 1]
                 score = float(1.0 / (1.0 + np.exp(-llr)))
             results.append({"score": score, "label": int(score >= 0.5)})
         return results
 
 
 class RobertaDetector:
-    """Zero-shot detector using the RoBERTa-based OpenAI text detector.
+    """使用基于 RoBERTa 的 OpenAI 文本检测器的零样本检测器。
 
-    Wraps ``openai-community/roberta-base-openai-detector`` (or any compatible
-    binary text-classification model).
+    封装 ``openai-community/roberta-base-openai-detector``
+    （或任何兼容的二元文本分类模型）。
 
-    Parameters
-    ----------
+    参数
+    ----
     model_name:
-        HuggingFace model ID.
+        HuggingFace 模型 ID。
     device:
-        Torch device (``-1`` for CPU, ``0`` for first GPU).
+        Torch 设备（``-1`` 表示 CPU，``0`` 表示第一块 GPU）。
     batch_size:
-        Inference batch size.
+        推理批次大小。
     """
 
-    _FAKE_LABEL = "LABEL_1"  # "Fake" / AI-generated label
+    _FAKE_LABEL = "LABEL_1"  # "伪造" / AI 生成标签
 
     def __init__(
         self,
@@ -159,11 +158,11 @@ class RobertaDetector:
         self.batch_size = batch_size
 
     def predict(self, texts: List[str]) -> List[dict]:
-        """Return prediction dicts with keys ``score`` and ``label``."""
+        """返回包含 ``score`` 和 ``label`` 键的预测字典列表。"""
         outputs = self._pipe(texts, batch_size=self.batch_size)
         results = []
         for out in outputs:
-            # Score is probability of the "Fake"/AI label
+            # 得分为"伪造"/AI 标签的概率
             if out["label"] == self._FAKE_LABEL:
                 score = float(out["score"])
             else:

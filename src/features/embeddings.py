@@ -1,18 +1,18 @@
 """
 embeddings.py
 -------------
-Sentence-embedding features for AI-generated text detection.
+用于 AI 生成文本检测的句子嵌入特征。
 
-When a *source* document is available alongside the *suspicious* document,
-semantic similarity between the two can reveal whether the suspicious text is
-a paraphrase or rewrite of the source — a strong signal of generated plagiarism.
+当*可疑*文档旁边还有*原始*文档时，
+两者之间的语义相似度可以揭示可疑文本是否为原文的
+改写或复述——这是生成式剽窃的强信号。
 
-Features computed
-~~~~~~~~~~~~~~~~~
-* Document-level embedding (768-d vector from a sentence-transformer)
-* Cosine similarity between suspicious and source embeddings (paired mode)
-* Mean pairwise cosine similarity of sentence embeddings within a document
-  (self-similarity — AI text tends to be more uniformly self-similar)
+计算的特征
+~~~~~~~~~~
+* 文档级嵌入向量（来自句子 Transformer 的 768 维向量）
+* 可疑文档与原始文档嵌入之间的余弦相似度（配对模式）
+* 文档内句子嵌入的平均两两余弦相似度
+  （自相似度——AI 文本往往具有更均匀的自相似性）
 """
 
 from __future__ import annotations
@@ -35,16 +35,16 @@ _DEFAULT_MODEL = "all-MiniLM-L6-v2"
 
 
 class EmbeddingFeatures:
-    """Compute embedding-based features for generated-text detection.
+    """为生成文本检测计算基于嵌入的特征。
 
-    Parameters
-    ----------
+    参数
+    ----
     model_name:
-        HuggingFace / sentence-transformers model identifier.
+        HuggingFace / sentence-transformers 模型标识符。
     device:
-        ``"cuda"`` or ``"cpu"``.  Defaults to CPU.
+        ``"cuda"`` 或 ``"cpu"``，默认使用 CPU。
     batch_size:
-        Batch size for the sentence encoder.
+        句子编码器的批次大小。
     """
 
     def __init__(
@@ -57,11 +57,11 @@ class EmbeddingFeatures:
         self.batch_size = batch_size
 
     # ------------------------------------------------------------------
-    # Public API
+    # 公开 API
     # ------------------------------------------------------------------
 
     def encode(self, texts: List[str]) -> np.ndarray:
-        """Return a (N, D) embedding matrix for a list of texts."""
+        """为文本列表返回 (N, D) 嵌入矩阵。"""
         return self.model.encode(
             texts,
             batch_size=self.batch_size,
@@ -75,37 +75,37 @@ class EmbeddingFeatures:
         text: str,
         source_text: Optional[str] = None,
     ) -> dict:
-        """Extract embedding features for *text*.
+        """为 *text* 提取嵌入特征。
 
-        Parameters
-        ----------
+        参数
+        ----
         text:
-            The suspicious document.
+            可疑文档。
         source_text:
-            Optional source document for paired comparison.
+            可选的原始文档，用于配对比较。
 
-        Returns
-        -------
-        dict with keys:
+        返回
+        ----
+        包含以下键的字典：
 
-        * ``embedding``            – (D,) numpy array (document embedding)
-        * ``self_sim``             – mean intra-document sentence similarity
-        * ``source_sim``           – cosine similarity to source (NaN if absent)
+        * ``embedding``            —— (D,) numpy 数组（文档嵌入向量）
+        * ``self_sim``             —— 文档内句子平均自相似度
+        * ``source_sim``           —— 与原文的余弦相似度（不存在时为 NaN）
         """
         sentences = sent_tokenize(text) if text.strip() else [text]
         doc_emb = self.encode([text])[0]
 
-        # Intra-document self-similarity
+        # 文档内自相似度
         if len(sentences) > 1:
             sent_embs = self.encode(sentences)  # (S, D)
             sim_matrix = cosine_similarity(sent_embs)
-            # Exclude diagonal (self-similarity = 1.0)
+            # 排除对角线（自身相似度 = 1.0）
             mask = ~np.eye(len(sentences), dtype=bool)
             self_sim = float(sim_matrix[mask].mean())
         else:
             self_sim = float("nan")
 
-        # Paired source similarity
+        # 配对原文相似度
         if source_text and source_text.strip():
             src_emb = self.encode([source_text])[0]
             source_sim = float(cosine_similarity([doc_emb], [src_emb])[0, 0])
@@ -123,7 +123,7 @@ class EmbeddingFeatures:
         texts: List[str],
         source_texts: Optional[List[Optional[str]]] = None,
     ) -> List[dict]:
-        """Extract features for a list of texts."""
+        """为文本列表批量提取特征。"""
         if source_texts is None:
             source_texts = [None] * len(texts)
         return [

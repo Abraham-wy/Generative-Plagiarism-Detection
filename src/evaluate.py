@@ -1,19 +1,19 @@
 """
 evaluate.py
 -----------
-Evaluation utilities that mirror the PAN official metrics.
+与 PAN 官方指标对应的评估工具函数。
 
-Metrics computed
-~~~~~~~~~~~~~~~~
-* Accuracy
-* Macro-F1  (primary PAN metric)
-* Binary F1 (per-class)
+计算的指标
+~~~~~~~~~~
+* 准确率（Accuracy）
+* 宏平均 F1（Macro-F1，PAN 主要指标）
+* 各类别二元 F1
 * AUC-ROC
-* Average precision (AP)
-* Confusion matrix
+* 平均精度（AP）
+* 混淆矩阵
 
-All functions accept lists (or arrays) of integer ground-truth labels and
-either integer predicted labels or float probability scores.
+所有函数均接受整数真实标签列表（或数组），
+以及整数预测标签或浮点概率分数。
 """
 
 from __future__ import annotations
@@ -37,23 +37,22 @@ def compute_metrics(
     y_pred: List[int],
     y_score: Optional[List[float]] = None,
 ) -> dict:
-    """Compute all PAN-relevant evaluation metrics.
+    """计算所有与 PAN 相关的评估指标。
 
-    Parameters
-    ----------
+    参数
+    ----
     y_true:
-        Ground-truth binary labels (0 = human, 1 = AI-generated).
+        真实二元标签（0 = 人类，1 = AI 生成）。
     y_pred:
-        Predicted binary labels.
+        预测二元标签。
     y_score:
-        Optional predicted probability scores for the positive class.
-        Required for AUC-ROC and AP.
+        可选，正类的预测概率分数（AUC-ROC 和 AP 计算所需）。
 
-    Returns
-    -------
-    dict with keys: ``accuracy``, ``f1_macro``, ``f1_human``, ``f1_ai``,
-    ``roc_auc`` (NaN if y_score not provided), ``average_precision``
-    (NaN if y_score not provided).
+    返回
+    ----
+    包含以下键的字典：``accuracy``、``f1_macro``、``f1_human``、``f1_ai``、
+    ``roc_auc``（未提供 y_score 时为 NaN）、``average_precision``
+    （未提供 y_score 时为 NaN）。
     """
     y_true_arr = np.array(y_true)
     y_pred_arr = np.array(y_pred)
@@ -91,9 +90,9 @@ def print_report(
     y_true: List[int],
     y_pred: List[int],
     y_score: Optional[List[float]] = None,
-    title: str = "Evaluation Report",
+    title: str = "评估报告",
 ) -> None:
-    """Print a formatted evaluation report to stdout."""
+    """将格式化的评估报告打印到标准输出。"""
     metrics = compute_metrics(y_true, y_pred, y_score)
     cm = confusion_matrix(y_true, y_pred)
 
@@ -101,20 +100,20 @@ def print_report(
     print(f"\n{sep}")
     print(f"  {title}")
     print(sep)
-    print(f"  Accuracy         : {metrics['accuracy']:.4f}")
-    print(f"  F1 (macro)       : {metrics['f1_macro']:.4f}  ← primary metric")
-    print(f"  F1 (human)       : {metrics['f1_human']:.4f}")
-    print(f"  F1 (AI-generated): {metrics['f1_ai']:.4f}")
+    print(f"  准确率            : {metrics['accuracy']:.4f}")
+    print(f"  F1（宏平均）      : {metrics['f1_macro']:.4f}  ← 主要指标")
+    print(f"  F1（人类）        : {metrics['f1_human']:.4f}")
+    print(f"  F1（AI 生成）     : {metrics['f1_ai']:.4f}")
     if not np.isnan(metrics["roc_auc"]):
         print(f"  AUC-ROC          : {metrics['roc_auc']:.4f}")
     if not np.isnan(metrics["average_precision"]):
-        print(f"  Avg Precision    : {metrics['average_precision']:.4f}")
+        print(f"  平均精度         : {metrics['average_precision']:.4f}")
     print()
-    print(classification_report(y_true, y_pred, target_names=["Human", "AI-generated"]))
-    print("Confusion matrix:")
-    print("             Pred Human  Pred AI")
-    print(f"  True Human     {cm[0,0]:5d}    {cm[0,1]:5d}")
-    print(f"  True AI        {cm[1,0]:5d}    {cm[1,1]:5d}")
+    print(classification_report(y_true, y_pred, target_names=["人类", "AI 生成"]))
+    print("混淆矩阵：")
+    print("               预测：人类  预测：AI")
+    print(f"  真实：人类     {cm[0,0]:5d}    {cm[0,1]:5d}")
+    print(f"  真实：AI       {cm[1,0]:5d}    {cm[1,1]:5d}")
     print(sep)
 
 
@@ -123,20 +122,20 @@ def optimal_threshold(
     y_score: List[float],
     metric: str = "f1_macro",
 ) -> Tuple[float, float]:
-    """Find the decision threshold that maximises *metric* on the given data.
+    """在给定数据上寻找使 *metric* 最大的决策阈值。
 
-    Parameters
-    ----------
+    参数
+    ----
     y_true:
-        Ground-truth binary labels.
+        真实二元标签。
     y_score:
-        Predicted probability scores.
+        预测概率分数。
     metric:
-        One of ``"f1_macro"``, ``"accuracy"``.
+        ``"f1_macro"`` 或 ``"accuracy"`` 之一。
 
-    Returns
-    -------
-    Tuple ``(best_threshold, best_metric_value)``.
+    返回
+    ----
+    元组 ``(最优阈值, 对应指标值)``。
     """
     thresholds = np.linspace(0.0, 1.0, 201)
     best_thresh = 0.5
@@ -149,7 +148,7 @@ def optimal_threshold(
         elif metric == "accuracy":
             val = accuracy_score(y_true, y_pred)
         else:
-            raise ValueError(f"Unknown metric: {metric!r}")
+            raise ValueError(f"未知指标：{metric!r}")
         if val > best_val:
             best_val = val
             best_thresh = float(thresh)

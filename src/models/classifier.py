@@ -1,15 +1,14 @@
 """
 classifier.py
 -------------
-Supervised fine-tuned classifier for AI-generated text detection.
+用于 AI 生成文本检测的监督微调分类器。
 
-Two variants are provided:
+提供两个变体：
 
-* **FineTunedClassifier** – fine-tunes a DeBERTa-v3-base (or similar)
-  sequence-classification model directly on raw texts.
-* **FeatureClassifier** – trains a lightweight gradient-boosted classifier
-  on the hand-crafted feature vectors produced by the feature-extraction
-  modules (useful when compute is limited).
+* **FineTunedClassifier** —— 在原始文本上直接微调 DeBERTa-v3-base
+  （或类似模型）进行序列分类。
+* **FeatureClassifier** —— 基于特征提取模块生成的手工特征向量，
+  训练轻量级梯度提升分类器（适用于算力有限的场景）。
 """
 
 from __future__ import annotations
@@ -35,7 +34,7 @@ import joblib
 
 
 # ---------------------------------------------------------------------------
-# Torch dataset wrapper
+# Torch 数据集封装
 # ---------------------------------------------------------------------------
 
 class _TextDataset(Dataset):
@@ -54,22 +53,22 @@ class _TextDataset(Dataset):
 
 
 # ---------------------------------------------------------------------------
-# Fine-tuned sequence classifier
+# 序列分类微调器
 # ---------------------------------------------------------------------------
 
 class FineTunedClassifier:
-    """Fine-tune a pre-trained transformer for binary AI-text classification.
+    """对预训练 Transformer 进行微调，用于二元 AI 文本分类。
 
-    Parameters
-    ----------
+    参数
+    ----
     model_name:
-        HuggingFace model ID (default: DeBERTa-v3-base).
+        HuggingFace 模型 ID（默认：DeBERTa-v3-base）。
     max_length:
-        Maximum token length.
+        最大词元长度。
     output_dir:
-        Directory to save checkpoints and the final model.
+        保存检查点和最终模型的目录。
     num_labels:
-        Number of output classes (default 2: human / AI).
+        输出类别数（默认为 2：人类 / AI）。
     """
 
     def __init__(
@@ -87,7 +86,7 @@ class FineTunedClassifier:
         self._model: Optional[AutoModelForSequenceClassification] = None
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # 内部辅助方法
     # ------------------------------------------------------------------
 
     def _get_tokenizer(self) -> AutoTokenizer:
@@ -119,7 +118,7 @@ class FineTunedClassifier:
         }
 
     # ------------------------------------------------------------------
-    # Public API
+    # 公开 API
     # ------------------------------------------------------------------
 
     def fit(
@@ -133,7 +132,7 @@ class FineTunedClassifier:
         learning_rate: float = 2e-5,
         warmup_ratio: float = 0.1,
     ) -> None:
-        """Fine-tune the model on *train_texts* / *train_labels*."""
+        """在 *train_texts* / *train_labels* 上微调模型。"""
         self._model = AutoModelForSequenceClassification.from_pretrained(
             self.model_name, num_labels=self.num_labels
         )

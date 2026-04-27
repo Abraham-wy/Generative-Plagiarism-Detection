@@ -1,26 +1,25 @@
 """
 data_loader.py
 --------------
-Utilities for loading and saving PAN 2026 Generated-Plagiarism-Detection
-datasets.
+用于加载和保存 PAN 2026 生成式剽窃检测数据集的工具函数。
 
-Expected input formats
-~~~~~~~~~~~~~~~~~~~~~~
-JSONL (one JSON object per line)::
+支持的输入格式
+~~~~~~~~~~~~~~
+JSONL（每行一个 JSON 对象）::
 
     {"id": "doc1", "text": "The quick brown fox ...", "label": 1}
     {"id": "doc2", "text": "Lorem ipsum ...",          "label": 0}
 
-For paired tasks a ``source_text`` field may also be present::
+对于配对任务，可额外包含 ``source_text`` 字段::
 
     {"id": "doc3", "text": "...", "source_text": "...", "label": 1}
 
-``label`` is optional in test sets (prediction mode).
+``label`` 在测试集（预测模式）中为可选字段。
 
-XML (PAN corpus format)
-~~~~~~~~~~~~~~~~~~~~~~~
-Each document is a separate file ``<id>.txt`` inside a directory, with a
-companion ``truth.jsonl`` (or ``truth.xml``) for labels.
+XML（PAN 语料库格式）
+~~~~~~~~~~~~~~~~~~~~~
+每篇文档单独存放为目录下的 ``<id>.txt`` 文件，
+配套一个 ``truth.jsonl``（或 ``truth.xml``）存放标签。
 """
 
 from __future__ import annotations
@@ -35,11 +34,11 @@ import pandas as pd
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
+# 内部辅助函数
 # ---------------------------------------------------------------------------
 
 def _parse_record(raw: dict) -> dict:
-    """Normalise a raw JSON record into the canonical schema."""
+    """将原始 JSON 记录规范化为统一模式。"""
     record: dict = {
         "id": str(raw.get("id", "")),
         "text": str(raw.get("text", "")),
@@ -51,11 +50,11 @@ def _parse_record(raw: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# 公开 API
 # ---------------------------------------------------------------------------
 
 def load_jsonl(path: str | Path) -> List[dict]:
-    """Load a JSONL file and return a list of normalised record dicts."""
+    """加载 JSONL 文件，返回规范化记录字典的列表。"""
     records: List[dict] = []
     with jsonlines.open(str(path)) as reader:
         for raw in reader:
@@ -67,18 +66,18 @@ def load_directory(
     text_dir: str | Path,
     truth_path: Optional[str | Path] = None,
 ) -> List[dict]:
-    """Load a directory of plain-text files with an optional truth file.
+    """加载纯文本文件目录，并可选地读取真值标签文件。
 
-    Parameters
-    ----------
+    参数
+    ----
     text_dir:
-        Directory containing ``<id>.txt`` files.
+        包含 ``<id>.txt`` 文件的目录。
     truth_path:
-        Optional path to a JSONL truth file mapping ``id`` → ``label``.
+        可选，指向 JSONL 真值文件（映射 ``id`` → ``label``）的路径。
 
-    Returns
-    -------
-    List of record dicts (same schema as :func:`load_jsonl`).
+    返回
+    ----
+    记录字典列表（与 :func:`load_jsonl` 返回的格式相同）。
     """
     text_dir = Path(text_dir)
     labels: Dict[str, int] = {}
@@ -99,7 +98,7 @@ def load_directory(
 
 
 def to_dataframe(records: List[dict]) -> pd.DataFrame:
-    """Convert a list of record dicts to a :class:`pandas.DataFrame`."""
+    """将记录字典列表转换为 :class:`pandas.DataFrame`。"""
     return pd.DataFrame(records)
 
 
@@ -107,18 +106,18 @@ def save_predictions(
     predictions: List[dict],
     output_path: str | Path,
 ) -> None:
-    """Save predictions to a JSONL file.
+    """将预测结果保存为 JSONL 文件。
 
-    Each entry in *predictions* should have at least ``id`` and ``score``
-    (a float in [0, 1] representing the probability of AI generation).
-    A ``label`` key (0 or 1) is added automatically via hard threshold 0.5.
+    *predictions* 中的每个条目至少需包含 ``id`` 和 ``score``
+    （[0, 1] 范围内的浮点数，表示 AI 生成的概率）。
+    ``label`` 键（0 或 1）将根据硬阈值 0.5 自动添加。
 
-    Parameters
-    ----------
+    参数
+    ----
     predictions:
-        List of dicts with keys ``id`` and ``score``.
+        包含 ``id`` 和 ``score`` 键的字典列表。
     output_path:
-        Destination file path (will be created / overwritten).
+        目标文件路径（文件将被创建或覆盖）。
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -133,6 +132,6 @@ def save_predictions(
 
 
 def load_predictions(path: str | Path) -> List[dict]:
-    """Load a previously saved predictions JSONL file."""
+    """加载先前保存的预测 JSONL 文件。"""
     with jsonlines.open(str(path)) as reader:
         return list(reader)
