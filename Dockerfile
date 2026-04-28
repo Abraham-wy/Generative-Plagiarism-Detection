@@ -53,8 +53,7 @@ ENV TASK=classify \
     RETRIEVAL_RERANK=true
 
 CMD if [ "$TASK" = "retrieve" ]; then \
-        RERANK_FLAG="--rerank"; \
-        if [ "$RETRIEVAL_RERANK" = "false" ]; then RERANK_FLAG="--no-rerank"; fi; \
+        if [ "$RETRIEVAL_RERANK" = "true" ]; then RERANK_FLAG="--rerank"; else RERANK_FLAG="--no-rerank"; fi; \
         python retrieve.py \
             --dataset  "$RETRIEVAL_DATASET" \
             --output   /output \

@@ -279,7 +279,7 @@ def _reciprocal_rank_fusion(
         for _, row in df.iterrows():
             qid = str(row["qid"])
             docno = str(row["docno"])
-            rank = int(row["rank"]) + 1  # rank 从 0 开始，+1 避免除零
+            rank = int(row["rank"]) + 1  # Convert 0-based rank to 1-based rank for the RRF formula: 1/(k + rank)
             scores[qid][docno] += 1.0 / (k + rank)
 
     rows = []
