@@ -1,0 +1,610 @@
+#!/usr/bin/env python3
+"""
+retrieve.py
+-----------
+PAN 2026 生成式剽窃检测 —— 检索子任务入口。
+
+任务描述
+~~~~~~~~
+给定一批由 LLM 自动生成的可疑文档（查询），在语料库中检索最多 1000 篇
+最可能作为其生成来源的文档，并以 TREC run 格式输出结果。
+
+检索策略（三级流水线）
+~~~~~~~~~~~~~~~~~~~~~
+1. **一阶段 BM25（多子查询 + RRF）**
+   - 将可疑文档按句子分段，从中均匀抽取若干子查询片段
+   - 对每个子查询单独用 BM25 检索 top-k 文档
+   - 使用 Reciprocal Rank Fusion（RRF）融合多组结果，得到候选集（默认 200）
+
+2. **二阶段密集向量重排序（Dense Re-ranking，可选）**
+   - 用 sentence-transformers（all-MiniLM-L6-v2）将可疑文档与候选文档编码为向量
+   - 计算余弦相似度，按相似度重排前 200 候选，最终取 top-1000
+
+3. **输出**
+   - TREC run 格式（gzip 压缩）：run.txt.gz
+
+用法
+~~~~
+本地文件（corpus.jsonl.gz + queries.jsonl）::
+
+    python retrieve.py \\
+        --dataset /path/to/data/dir \\
+        --output  output/ \\
+        --index   /tmp/indexes
+
+ir_datasets（TIRA 平台或本地已安装）::
+
+    python retrieve.py \\
+        --dataset pan26-generated-plagiarism-detection/spot-check-dataset-20260227-training \\
+        --output  output/ \\
+        --index   /tmp/indexes
+
+关闭密集重排序（纯 BM25 模式，速度最快）::
+
+    python retrieve.py \\
+        --dataset /path/to/data/dir \\
+        --output  output/ \\
+        --index   /tmp/indexes \\
+        --no-rerank
+
+TIRA 代码提交::
+
+    tira-cli code-submission \\
+        --path . \\
+        --task pan26-generated-plagiarism-detection \\
+        --dataset spot-check-dataset-20260227-training \\
+        --command '/retrieve.py --dataset $inputDataset --index /tmp/indexes --output $outputDir' \\
+        --dry-run
+"""
+
+from __future__ import annotations
+
+import gzip
+import logging
+import os
+from pathlib import Path
+from typing import Iterator, List, NamedTuple
+
+import click
+import nltk
+import numpy as np
+import pandas as pd
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# NLTK 数据（首次运行自动下载）
+# ---------------------------------------------------------------------------
+for _pkg in ("punkt", "punkt_tab", "stopwords"):
+    try:
+        nltk.data.find(f"tokenizers/{_pkg}" if "punkt" in _pkg else f"corpora/{_pkg}")
+    except LookupError:
+        nltk.download(_pkg, quiet=True)
+
+from nltk.tokenize import sent_tokenize  # noqa: E402  (after nltk download)
+
+# ---------------------------------------------------------------------------
+# 简单数据结构
+# ---------------------------------------------------------------------------
+
+class Document(NamedTuple):
+    doc_id: str
+    text: str
+
+    def default_text(self) -> str:  # ir_datasets 兼容接口
+        return self.text
+
+
+class Query(NamedTuple):
+    query_id: str
+    text: str
+
+    def default_text(self) -> str:
+        return self.text
+
+
+# ---------------------------------------------------------------------------
+# 数据加载
+# ---------------------------------------------------------------------------
+
+def _load_local_dataset(data_dir: Path):
+    """
+    从本地目录加载 corpus.jsonl.gz 和 queries.jsonl。
+    返回一个鸭子类型对象，与 ir_datasets API 兼容。
+    """
+    import json
+
+    corpus_path = data_dir / "corpus.jsonl.gz"
+    queries_path = data_dir / "queries.jsonl"
+
+    if not corpus_path.exists():
+        raise FileNotFoundError(f"corpus.jsonl.gz not found in {data_dir}")
+    if not queries_path.exists():
+        raise FileNotFoundError(f"queries.jsonl not found in {data_dir}")
+
+    class LocalDataset:
+        def docs_iter(self) -> Iterator[Document]:
+            with gzip.open(corpus_path, "rt", encoding="utf-8") as f:
+                for line in f:
+                    obj = json.loads(line)
+                    yield Document(doc_id=str(obj["doc_id"]), text=str(obj["default_text"]))
+
+        def queries_iter(self) -> Iterator[Query]:
+            with open(queries_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    obj = json.loads(line)
+                    yield Query(query_id=str(obj["qid"]), text=str(obj["query"]))
+
+    return LocalDataset()
+
+
+def load_dataset(dataset_id_or_path: str):
+    """
+    智能加载数据集：
+    - 如果参数是一个存在的本地路径（目录），直接读取 corpus.jsonl.gz + queries.jsonl
+    - 否则，通过 tira.third_party_integrations.ir_datasets 加载（TIRA 平台或 ir_datasets 注册集）
+    """
+    local_path = Path(dataset_id_or_path)
+    if local_path.is_dir():
+        log.info("从本地目录加载数据集：%s", local_path)
+        return _load_local_dataset(local_path)
+    else:
+        log.info("通过 ir_datasets 加载数据集：%s", dataset_id_or_path)
+        from tira.third_party_integrations import ir_datasets
+        return ir_datasets.load(dataset_id_or_path)
+
+
+# ---------------------------------------------------------------------------
+# BM25 索引与检索
+# ---------------------------------------------------------------------------
+
+def _get_or_build_index(ir_dataset, index_directory: Path):
+    """
+    若索引不存在则构建，否则直接加载。
+    返回 PyTerrier Index 对象。
+    """
+    import pyterrier as pt
+
+    index_directory = index_directory.resolve().absolute()
+
+    if not (index_directory / "data.properties").exists():
+        log.info("构建 BM25 索引到：%s", index_directory)
+        index_directory.mkdir(parents=True, exist_ok=True)
+        indexer = pt.IterDictIndexer(
+            str(index_directory),
+            overwrite=True,
+            meta={"docno": 100, "text": 32768},
+        )
+        docs = (
+            {"docno": d.doc_id, "text": d.default_text()}
+            for d in ir_dataset.docs_iter()
+        )
+        indexer.index(docs)
+        log.info("索引构建完成。")
+    else:
+        log.info("加载已有索引：%s", index_directory)
+
+    return pt.IndexFactory.of(str(index_directory))
+
+
+def _make_sub_queries(query_text: str, n_chunks: int = 5, max_tokens: int = 64) -> List[str]:
+    """
+    将长文档切分为若干代表性子查询片段。
+
+    策略
+    ----
+    1. 将文档拆成句子列表
+    2. 均匀采样 ``n_chunks`` 组句子区间
+    3. 每组合并后截断到 ``max_tokens`` 个词（BM25 对极长查询不友好）
+    """
+    sentences = sent_tokenize(query_text)
+    if not sentences:
+        return [query_text[:500]]
+
+    if len(sentences) <= n_chunks:
+        chunks = [" ".join(sentences)]
+    else:
+        step = max(1, len(sentences) // n_chunks)
+        chunks = []
+        for start in range(0, len(sentences), step):
+            chunk = " ".join(sentences[start: start + max(1, step)])
+            chunks.append(chunk)
+        chunks = chunks[:n_chunks]
+
+    # 截断每个子查询
+    result = []
+    for chunk in chunks:
+        words = chunk.split()
+        result.append(" ".join(words[:max_tokens]))
+    return result
+
+
+def _bm25_retrieve(index, bm25, queries_df: pd.DataFrame, top_k: int = 200) -> pd.DataFrame:
+    """
+    对 queries_df 中的每条查询执行 BM25 检索，返回所有结果的 DataFrame。
+    """
+    import pyterrier as pt
+
+    tokeniser = pt.java.autoclass(
+        "org.terrier.indexing.tokenisation.Tokeniser"
+    ).getTokeniser()
+
+    queries_df = queries_df.copy()
+    queries_df["query"] = queries_df["query"].apply(
+        lambda q: " ".join(tokeniser.getTokens(q))
+    )
+    # 过滤空查询
+    queries_df = queries_df[queries_df["query"].str.strip() != ""]
+
+    if queries_df.empty:
+        return pd.DataFrame(columns=["qid", "docno", "score", "rank"])
+
+    bm25_top_k = bm25 % pt.rewrite.reset() >> pt.terrier.Retriever(
+        index, wmodel="BM25", num_results=top_k
+    )
+    return bm25_top_k(queries_df)
+
+
+def _reciprocal_rank_fusion(
+    ranked_lists: List[pd.DataFrame],
+    k: int = 60,
+    top_n: int = 200,
+) -> pd.DataFrame:
+    """
+    Reciprocal Rank Fusion（RRF）融合多组排名结果。
+
+    参数
+    ----
+    ranked_lists : List[DataFrame]
+        每个 DataFrame 包含 qid、docno、rank 列。
+    k : int
+        RRF 公式中的平滑常数（通常取 60）。
+    top_n : int
+        每个 qid 保留的最大文档数。
+
+    返回
+    ----
+    融合后的 DataFrame（qid、docno、score、rank）。
+    """
+    from collections import defaultdict
+
+    scores: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+
+    for df in ranked_lists:
+        for _, row in df.iterrows():
+            qid = str(row["qid"])
+            docno = str(row["docno"])
+            rank = int(row["rank"]) + 1  # rank 从 0 开始，+1 避免除零
+            scores[qid][docno] += 1.0 / (k + rank)
+
+    rows = []
+    for qid, doc_scores in scores.items():
+        sorted_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
+        for rank_idx, (docno, score) in enumerate(sorted_docs[:top_n]):
+            rows.append({"qid": qid, "docno": docno, "score": score, "rank": rank_idx})
+
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# 密集向量重排序
+# ---------------------------------------------------------------------------
+
+def _dense_rerank(
+    candidates_df: pd.DataFrame,
+    query_texts: dict[str, str],
+    doc_texts: dict[str, str],
+    top_n: int = 1000,
+    batch_size: int = 128,
+    model_name: str = "all-MiniLM-L6-v2",
+) -> pd.DataFrame:
+    """
+    使用 sentence-transformers 对 BM25 候选集进行密集向量重排序。
+
+    参数
+    ----
+    candidates_df : DataFrame
+        BM25 / RRF 候选集（qid、docno、score、rank）。
+    query_texts : dict[str, str]
+        qid -> 查询文本映射。
+    doc_texts : dict[str, str]
+        docno -> 文档文本映射（仅候选文档）。
+    top_n : int
+        每个 qid 最终保留文档数。
+    batch_size : int
+        编码批次大小。
+    model_name : str
+        sentence-transformers 模型标识符。
+
+    返回
+    ----
+    重排序后的 DataFrame（qid、docno、score、rank）。
+    """
+    from sentence_transformers import SentenceTransformer
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    log.info("加载 sentence-transformer 模型：%s", model_name)
+    device = "cuda" if _cuda_available() else "cpu"
+    model = SentenceTransformer(model_name, device=device)
+
+    rows = []
+    qids = candidates_df["qid"].unique()
+
+    for qid in qids:
+        cand = candidates_df[candidates_df["qid"] == qid].copy()
+        q_text = query_texts.get(str(qid), "")
+
+        # 截断查询（避免过长影响编码速度）
+        q_words = q_text.split()
+        q_text_trunc = " ".join(q_words[:256])
+
+        doc_ids = cand["docno"].tolist()
+        doc_texts_list = [doc_texts.get(str(d), "")[:2048] for d in doc_ids]
+
+        if not doc_texts_list:
+            continue
+
+        q_emb = model.encode([q_text_trunc], batch_size=1, normalize_embeddings=True)
+        d_embs = model.encode(doc_texts_list, batch_size=batch_size, normalize_embeddings=True, show_progress_bar=False)
+
+        sims = cosine_similarity(q_emb, d_embs)[0]
+
+        sorted_idx = np.argsort(sims)[::-1][:top_n]
+        for rank_idx, idx in enumerate(sorted_idx):
+            rows.append({
+                "qid": qid,
+                "docno": doc_ids[idx],
+                "score": float(sims[idx]),
+                "rank": rank_idx,
+            })
+
+    return pd.DataFrame(rows)
+
+
+def _cuda_available() -> bool:
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# 主流水线
+# ---------------------------------------------------------------------------
+
+def process_dataset(
+    ir_dataset,
+    index_directory: Path,
+    output_directory: Path,
+    n_sub_queries: int = 5,
+    sub_query_tokens: int = 64,
+    bm25_top_k: int = 200,
+    final_top_k: int = 1000,
+    rerank: bool = True,
+    rerank_model: str = "all-MiniLM-L6-v2",
+    system_tag: str = "pan26-retrieval",
+) -> None:
+    """
+    完整检索流水线：BM25 多子查询 + RRF → （可选）密集重排序 → TREC 输出。
+    """
+    import pyterrier as pt
+
+    output_file = output_directory / "run.txt.gz"
+    if output_file.exists():
+        log.info("输出文件已存在，跳过：%s", output_file)
+        return
+
+    output_directory.mkdir(parents=True, exist_ok=True)
+
+    # 1. 构建/加载 BM25 索引
+    index = _get_or_build_index(ir_dataset, index_directory)
+    bm25 = pt.terrier.Retriever(index, wmodel="BM25", num_results=bm25_top_k)
+
+    # 2. 加载所有查询
+    log.info("加载查询文档 …")
+    query_records = list(ir_dataset.queries_iter())
+    query_texts: dict[str, str] = {q.query_id: q.default_text() for q in query_records}
+    log.info("共 %d 条查询。", len(query_records))
+
+    # 3. 多子查询 BM25 检索
+    log.info("执行多子查询 BM25 检索（n_sub_queries=%d, top_k=%d） …",
+             n_sub_queries, bm25_top_k)
+    all_ranked: List[pd.DataFrame] = []
+    for sub_idx in range(n_sub_queries):
+        rows = []
+        for qid, q_text in query_texts.items():
+            sub_qs = _make_sub_queries(q_text, n_chunks=n_sub_queries, max_tokens=sub_query_tokens)
+            # 每次循环取第 sub_idx 条子查询（若不足则循环取最后一条）
+            sq = sub_qs[min(sub_idx, len(sub_qs) - 1)]
+            rows.append({"qid": qid, "query": sq})
+
+        sub_df = pd.DataFrame(rows)
+        result = _bm25_retrieve(index, bm25, sub_df, top_k=bm25_top_k)
+        if not result.empty:
+            all_ranked.append(result)
+
+    if not all_ranked:
+        log.warning("BM25 检索结果为空！")
+        return
+
+    # 4. RRF 融合
+    log.info("RRF 融合 %d 组结果 …", len(all_ranked))
+    fused_df = _reciprocal_rank_fusion(all_ranked, top_n=max(bm25_top_k, final_top_k))
+
+    # 5. 密集重排序（可选）
+    if rerank:
+        log.info("加载候选文档文本用于密集重排序 …")
+        candidate_docnos = set(fused_df["docno"].tolist())
+        doc_texts: dict[str, str] = {}
+        for d in ir_dataset.docs_iter():
+            if d.doc_id in candidate_docnos:
+                doc_texts[d.doc_id] = d.default_text()
+            if len(doc_texts) == len(candidate_docnos):
+                break  # 全部候选已收集，提前停止
+
+        log.info("对 %d 个候选文档进行密集重排序 …", len(doc_texts))
+        final_df = _dense_rerank(
+            fused_df,
+            query_texts=query_texts,
+            doc_texts=doc_texts,
+            top_n=final_top_k,
+            model_name=rerank_model,
+        )
+    else:
+        # 不重排序，直接截断到 final_top_k
+        final_df = (
+            fused_df.groupby("qid", group_keys=False)
+            .apply(lambda g: g.nlargest(final_top_k, "score"))
+            .reset_index(drop=True)
+        )
+        # 重新计算 rank（确保每个 qid 内从 0 开始）
+        final_df["rank"] = (
+            final_df.groupby("qid")["score"]
+            .rank(ascending=False, method="first")
+            .astype(int) - 1
+        )
+
+    # 6. 写出 TREC run 格式（gzip）
+    log.info("写出 TREC run 到：%s", output_file)
+    _write_trec_run(final_df, output_file, system_tag=system_tag)
+    log.info("完成！共写出 %d 条结果。", len(final_df))
+
+
+def _write_trec_run(
+    df: pd.DataFrame,
+    output_path: Path,
+    system_tag: str = "pan26-retrieval",
+) -> None:
+    """
+    将 DataFrame（qid、docno、score、rank）写成 TREC run 格式（gzip 压缩）。
+
+    格式：qid Q0 docno rank score tag
+    """
+    # 按 qid 和 score 排序（trec_eval 依赖得分降序，不依赖 rank 字段）
+    df = df.sort_values(["qid", "score"], ascending=[True, False])
+
+    lines = []
+    for _, row in df.iterrows():
+        qid = str(row["qid"])
+        docno = str(row["docno"])
+        rank = int(row["rank"])
+        score = float(row["score"])
+        lines.append(f"{qid} Q0 {docno} {rank} {score:.6f} {system_tag}\n")
+
+    with gzip.open(output_path, "wt", encoding="utf-8") as f:
+        f.writelines(lines)
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+@click.command()
+@click.option(
+    "--dataset",
+    type=str,
+    required=True,
+    help="ir_datasets 数据集 ID（如 pan26-generated-plagiarism-detection/spot-check-dataset-20260227-training）"
+         "或包含 corpus.jsonl.gz + queries.jsonl 的本地目录路径。",
+)
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="输出目录，run.txt.gz 将写入此目录。",
+)
+@click.option(
+    "--index",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="BM25 索引存储目录（首次运行时自动构建）。",
+)
+@click.option(
+    "--n-sub-queries",
+    type=int,
+    default=5,
+    show_default=True,
+    help="每条查询拆分的子查询数量（多子查询提升召回率）。",
+)
+@click.option(
+    "--sub-query-tokens",
+    type=int,
+    default=64,
+    show_default=True,
+    help="每条子查询截断的最大词数。",
+)
+@click.option(
+    "--bm25-top-k",
+    type=int,
+    default=200,
+    show_default=True,
+    help="BM25 每条子查询检索的候选文档数。",
+)
+@click.option(
+    "--final-top-k",
+    type=int,
+    default=1000,
+    show_default=True,
+    help="最终每条查询输出的文档数（≤1000）。",
+)
+@click.option(
+    "--rerank/--no-rerank",
+    default=True,
+    show_default=True,
+    help="是否启用 sentence-transformer 密集重排序（禁用则为纯 BM25+RRF 模式）。",
+)
+@click.option(
+    "--rerank-model",
+    type=str,
+    default="all-MiniLM-L6-v2",
+    show_default=True,
+    help="密集重排序使用的 sentence-transformers 模型名称。",
+)
+@click.option(
+    "--tag",
+    type=str,
+    default="pan26-retrieval",
+    show_default=True,
+    help="TREC run 文件中的系统标识符（system tag）。",
+)
+def main(
+    dataset: str,
+    output: Path,
+    index: Path,
+    n_sub_queries: int,
+    sub_query_tokens: int,
+    bm25_top_k: int,
+    final_top_k: int,
+    rerank: bool,
+    rerank_model: str,
+    tag: str,
+) -> None:
+    """PAN 2026 生成式剽窃检测 —— 改进检索系统。"""
+    import pyterrier as pt
+    if not pt.started():
+        pt.init()
+
+    ir_dataset = load_dataset(dataset)
+
+    process_dataset(
+        ir_dataset=ir_dataset,
+        index_directory=index,
+        output_directory=output,
+        n_sub_queries=n_sub_queries,
+        sub_query_tokens=sub_query_tokens,
+        bm25_top_k=bm25_top_k,
+        final_top_k=final_top_k,
+        rerank=rerank,
+        rerank_model=rerank_model,
+        system_tag=tag,
+    )
+
+
+if __name__ == "__main__":
+    main()

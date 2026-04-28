@@ -31,4 +31,9 @@ pyyaml>=6.0.1
 python-dotenv>=1.0.1
 
 # PAN / TIRA evaluation platform
-tira>=0.0.88
+tira>=0.0.194
+
+# 检索子任务（Retrieval task）
+python-terrier==0.13.0
+ir-datasets
+click
