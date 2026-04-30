@@ -1,0 +1,44 @@
+FROM python:3.11-slim
+
+# 系统依赖（含 JDK，提供 javac）
+RUN sed -i 's|http://deb.debian.org|https://mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+ && apt-get -o Acquire::Retries=5 update \
+ && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+    build-essential \
+    python3-dev \
+    zlib1g-dev \
+    git \
+    curl \
+    ca-certificates \
+    gzip \
+    openjdk-21-jdk-headless \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.retrieval-lite.txt .
+RUN pip install --no-cache-dir -r requirements.retrieval-lite.txt
+
+# 预下载 NLTK
+RUN python - <<'PY'
+import nltk
+for pkg in ("punkt", "punkt_tab", "stopwords"):
+    nltk.download(pkg, quiet=True)
+PY
+
+# 关键：预热 PyTerrier（在 build 阶段下载好 jar）
+# 解释：
+# - PyTerrier 默认会去 repo1.maven.org（你那里会 SSL/中断）
+# - 我们把 Maven 仓库改成 repo.maven.apache.org（你 curl 测试是 200）
+ENV TERRIER_MAVEN_REPO=https://repo.maven.apache.org/maven2
+
+RUN python - <<'PY'
+import pyterrier as pt
+pt.init()
+print("PyTerrier initialized OK")
+PY
+
+COPY retrieve.py ./retrieve.py
+COPY src/ ./src/
+
+CMD ["python", "/app/retrieve.py", "--dataset", "/input", "--index", "/tmp/indexes", "--output", "/output", "--no-rerank"]
