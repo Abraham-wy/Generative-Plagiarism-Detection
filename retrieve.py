@@ -224,7 +224,7 @@ def _make_sub_queries(query_text: str, n_chunks: int = 5, max_tokens: int = 64) 
     return result
 
 
-def _bm25_retrieve(index, bm25, queries_df: pd.DataFrame, top_k: int = 200) -> pd.DataFrame:
+def _bm25_retrieve(bm25, queries_df: pd.DataFrame, top_k: int = 200) -> pd.DataFrame:
     """
     对 queries_df 中的每条查询执行 BM25 检索，返回所有结果的 DataFrame。
     """
@@ -244,10 +244,8 @@ def _bm25_retrieve(index, bm25, queries_df: pd.DataFrame, top_k: int = 200) -> p
     if queries_df.empty:
         return pd.DataFrame(columns=["qid", "docno", "score", "rank"])
 
-    bm25_top_k = bm25 % pt.rewrite.reset() >> pt.terrier.Retriever(
-        index, wmodel="BM25", num_results=top_k
-    )
-    return bm25_top_k(queries_df)
+    pipeline = bm25 % top_k >> pt.rewrite.reset()
+    return pipeline(queries_df)
 
 
 def _reciprocal_rank_fusion(
@@ -425,7 +423,7 @@ def process_dataset(
             rows.append({"qid": qid, "query": sq})
 
         sub_df = pd.DataFrame(rows)
-        result = _bm25_retrieve(index, bm25, sub_df, top_k=bm25_top_k)
+        result = _bm25_retrieve(bm25, sub_df, top_k=bm25_top_k)
         if not result.empty:
             all_ranked.append(result)
 
