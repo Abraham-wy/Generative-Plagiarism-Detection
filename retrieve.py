@@ -61,7 +61,6 @@ from __future__ import annotations
 
 import gzip
 import logging
-import os
 from pathlib import Path
 from typing import Iterator, List, NamedTuple
 
@@ -389,6 +388,7 @@ def process_dataset(
     rerank: bool = True,
     rerank_model: str = "all-MiniLM-L6-v2",
     system_tag: str = "pan26-retrieval",
+    force: bool = False,
 ) -> None:
     """
     完整检索流水线：BM25 多子查询 + RRF → （可选）密集重排序 → TREC 输出。
@@ -396,9 +396,12 @@ def process_dataset(
     import pyterrier as pt
 
     output_file = output_directory / "run.txt.gz"
-    if output_file.exists():
+    if output_file.exists() and not force:
         log.info("输出文件已存在，跳过：%s", output_file)
         return
+    if output_file.exists() and force:
+        log.info("覆盖已有输出文件：%s", output_file)
+        output_file.unlink()
 
     output_directory.mkdir(parents=True, exist_ok=True)
 
@@ -435,7 +438,10 @@ def process_dataset(
 
     # 4. RRF 融合
     log.info("RRF 融合 %d 组结果 …", len(all_ranked))
-    fused_df = _reciprocal_rank_fusion(all_ranked, top_n=max(bm25_top_k, final_top_k))
+    fused_df = _reciprocal_rank_fusion(
+        all_ranked,
+        top_n=max(bm25_top_k * n_sub_queries, final_top_k),
+    )
 
     # 5. 密集重排序（可选）
     if rerank:
@@ -447,6 +453,10 @@ def process_dataset(
                 doc_texts[d.doc_id] = d.default_text()
             if len(doc_texts) == len(candidate_docnos):
                 break  # 全部候选已收集，提前停止
+
+        missing_docs = len(candidate_docnos) - len(doc_texts)
+        if missing_docs:
+            log.warning("有 %d 个候选文档未能加载正文，将用空文本参与重排序。", missing_docs)
 
         log.info("对 %d 个候选文档进行密集重排序 …", len(doc_texts))
         final_df = _dense_rerank(
@@ -486,8 +496,10 @@ def _write_trec_run(
 
     格式：qid Q0 docno rank score tag
     """
-    # 按 qid 和 score 排序（trec_eval 依赖得分降序，不依赖 rank 字段）
-    df = df.sort_values(["qid", "score"], ascending=[True, False])
+    # 按 qid 和 score 排序（trec_eval 依赖得分降序，不依赖 rank 字段）。
+    # 排序后重新编号 rank，避免上游过滤或重排后出现 rank 与 score 顺序不一致。
+    df = df.sort_values(["qid", "score", "docno"], ascending=[True, False, True]).copy()
+    df["rank"] = df.groupby("qid").cumcount()
 
     lines = []
     for _, row in df.iterrows():
@@ -573,6 +585,11 @@ def _write_trec_run(
     show_default=True,
     help="TREC run 文件中的系统标识符（system tag）。",
 )
+@click.option(
+    "--force",
+    is_flag=True,
+    help="如果输出目录中已存在 run.txt.gz，则覆盖它并重新运行。",
+)
 def main(
     dataset: str,
     output: Path,
@@ -584,6 +601,7 @@ def main(
     rerank: bool,
     rerank_model: str,
     tag: str,
+    force: bool,
 ) -> None:
     """PAN 2026 生成式剽窃检测 —— 改进检索系统。"""
     import pyterrier as pt
@@ -603,6 +621,7 @@ def main(
         rerank=rerank,
         rerank_model=rerank_model,
         system_tag=tag,
+        force=force,
     )
 
 

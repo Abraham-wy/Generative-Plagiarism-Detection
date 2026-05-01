@@ -1,39 +1,6 @@
-# Core ML / NLP
-torch>=2.1.0
-transformers>=4.40.0
-sentence-transformers>=2.7.0
-datasets>=2.19.0
-accelerate>=0.29.0
-peft>=0.10.0
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
 
-# Classical ML & evaluation
-scikit-learn>=1.4.0
-numpy>=1.26.0
-pandas>=2.2.0
-scipy>=1.13.0
-
-# Text processing
-nltk>=3.8.1
-spacy>=3.7.0
-
-# Visualisation
-matplotlib>=3.8.0
-seaborn>=0.13.0
-
-# Notebooks
-jupyter>=1.0.0
-ipykernel>=6.29.0
-
-# Utilities
-tqdm>=4.66.0
-jsonlines>=4.0.0
-pyyaml>=6.0.1
-python-dotenv>=1.0.1
-
-# PAN / TIRA evaluation platform
-tira>=0.0.194
-
-# 检索子任务（Retrieval task）
-python-terrier==0.13.0
-ir-datasets
-click
+torch==2.2.2
+sentence-transformers==2.7.0
+numpy>=1.26.0,<2.0

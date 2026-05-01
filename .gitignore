@@ -32,6 +32,11 @@ results/*.joblib
 results/*.bin
 !results/.gitkeep
 
+# Retrieval runs and experiment outputs
+output/
+experiments/
+experiments-*/
+
 # Environment / secrets
 .env
 *.env
