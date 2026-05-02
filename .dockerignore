@@ -13,7 +13,6 @@ notebooks/
 docs/
 tools/
 src/
-retrieve.py
 train.py
 predict.py
 Dockerfile.lite

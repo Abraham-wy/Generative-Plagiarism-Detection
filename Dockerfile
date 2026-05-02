@@ -1,23 +1,24 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
 
-ENV PYTHONUNBUFFERED=1 \
-    PAN_MODEL=/models/all-MiniLM-L6-v2 \
-    PAN_THRESHOLD=0.80 \
-    PAN_OUTPUT_FORMAT=xml
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    default-jdk-headless \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements.retrieval-lite.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements.retrieval-lite.txt
 
-# Build-time download only. Runtime can run offline because the model is baked
-# into the image and selected through PAN_MODEL.
+RUN python -m nltk.downloader punkt punkt_tab stopwords
+
 RUN python - <<'PY'
 from sentence_transformers import SentenceTransformer
 SentenceTransformer("all-MiniLM-L6-v2").save("/models/all-MiniLM-L6-v2")
 PY
 
-COPY main.py ./main.py
+COPY retrieve.py ./retrieve.py
 
-ENTRYPOINT ["python", "/app/main.py"]
-CMD ["/input", "/output"]
+ENTRYPOINT ["python", "/app/retrieve.py"]
+CMD ["--dataset", "$inputDataset", "--index", "/tmp/indexes", "--output", "$outputDir"]
