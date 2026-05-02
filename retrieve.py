@@ -470,17 +470,9 @@ def process_dataset(
         )
     else:
         # 不重排序，直接截断到 final_top_k
-        final_df = (
-            fused_df.groupby("qid", group_keys=False)
-            .apply(lambda g: g.nlargest(final_top_k, "score"))
-            .reset_index(drop=True)
-        )
-        # 重新计算 rank（确保每个 qid 内从 0 开始）
-        final_df["rank"] = (
-            final_df.groupby("qid")["score"]
-            .rank(ascending=False, method="first")
-            .astype(int) - 1
-        )
+        final_df = fused_df.sort_values("score", ascending=False)
+        final_df = final_df.groupby("qid").head(final_top_k).reset_index(drop=True)
+        final_df["rank"] = final_df.groupby("qid").cumcount()
 
     # 6. 写出 TREC run 格式（gzip）
     log.info("写出 TREC run 到：%s", output_file)
