@@ -1,5 +1,7 @@
 # PAN Plagiarism Detection Offline Baseline
 
+> 中文说明请参阅 [README_zh.md](README_zh.md)
+
 This repository now provides a runnable baseline for the PAN generated plagiarism
 text-alignment task: given document pairs, detect reused passages between a
 suspicious document and its source document.
