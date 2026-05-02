@@ -13,6 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements.retrieval-lit
 
 RUN python -m nltk.downloader punkt punkt_tab stopwords
 
+# Pre-initialize PyTerrier to cache Maven/Terrier JARs at build time (runtime is offline)
+RUN python -c "import pyterrier as pt; pt.init()"
+
 RUN python - <<'PY'
 from sentence_transformers import SentenceTransformer
 SentenceTransformer("all-MiniLM-L6-v2").save("/models/all-MiniLM-L6-v2")
