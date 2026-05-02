@@ -244,9 +244,7 @@ def _bm25_retrieve(index, bm25, queries_df: pd.DataFrame, top_k: int = 200) -> p
     if queries_df.empty:
         return pd.DataFrame(columns=["qid", "docno", "score", "rank"])
 
-    bm25_top_k = bm25 >> pt.terrier.Retriever(
-        index, wmodel="BM25", num_results=top_k
-    )
+    bm25_top_k = bm25 % top_k
     return bm25_top_k(queries_df)
 
 
