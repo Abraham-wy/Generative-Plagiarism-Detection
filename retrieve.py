@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import gzip
 import logging
+import os
 from pathlib import Path
 from typing import Iterator, List, NamedTuple
 
@@ -329,7 +330,10 @@ def _dense_rerank(
 
     log.info("加载 sentence-transformer 模型：%s", model_name)
     device = "cuda" if _cuda_available() else "cpu"
-    model = SentenceTransformer(model_name, device=device)
+    if os.environ.get("PAN_MODEL"):
+        model = SentenceTransformer(os.environ["PAN_MODEL"], device=device, local_files_only=True)
+    else:
+        model = SentenceTransformer(model_name, device=device)
 
     rows = []
     qids = candidates_df["qid"].unique()
