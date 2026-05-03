@@ -63,7 +63,7 @@ import gzip
 import logging
 import os
 from pathlib import Path
-from typing import Iterator, List, NamedTuple
+from typing import Iterator, List, NamedTuple, Optional
 
 import click
 import nltk
@@ -248,10 +248,99 @@ def _bm25_retrieve(index, bm25, queries_df: pd.DataFrame, top_k: int = 200) -> p
     return bm25_top_k(queries_df)
 
 
+def _run_fusion_pipeline(
+    ir_dataset,
+    index_directory: Path,
+    output_file: Path,
+    query_texts: dict[str, str],
+    n_sub_queries: int,
+    sub_query_tokens: int,
+    bm25_top_k: int,
+    final_top_k: int,
+    rerank: bool,
+    rerank_model: str,
+    system_tag: str,
+    w_bm25: float,
+    w_dense: float,
+    w_ngram: float,
+) -> None:
+    """三路加权融合流水线：BM25 + Dense + N-gram 可选 → RRF → rerank。"""
+    import pyterrier as pt
+
+    # Build BM25 index
+    index = _get_or_build_index(ir_dataset, index_directory)
+    bm25_retriever = pt.terrier.Retriever(index, wmodel="BM25", num_results=bm25_top_k)
+
+    # Load all docs once
+    doc_texts_all: dict[str, str] = {}
+    for d in ir_dataset.docs_iter():
+        doc_texts_all[d.doc_id] = d.default_text()
+
+    ranked_paths: list[pd.DataFrame] = []
+    weights: list[float] = []
+
+    # Path A: BM25 + sub-queries → RRF (internal)
+    log.info("融合-路径A: BM25 多子查询 …")
+    bm25_ranked: list[pd.DataFrame] = []
+    for sub_idx in range(n_sub_queries):
+        rows = []
+        for qid, q_text in query_texts.items():
+            sub_qs = _make_sub_queries(q_text, n_chunks=n_sub_queries, max_tokens=sub_query_tokens)
+            sq = sub_qs[min(sub_idx, len(sub_qs) - 1)]
+            rows.append({"qid": qid, "query": sq})
+        sub_df = pd.DataFrame(rows)
+        result = _bm25_retrieve(index, bm25_retriever, sub_df, top_k=bm25_top_k)
+        if not result.empty:
+            bm25_ranked.append(result)
+    if bm25_ranked:
+        bm25_fused = _reciprocal_rank_fusion(bm25_ranked, top_n=bm25_top_k * n_sub_queries)
+        ranked_paths.append(bm25_fused)
+        weights.append(w_bm25)
+
+    # Path B: Dense
+    log.info("融合-路径B: Dense 向量检索 …")
+    dense_ranked = _dense_retrieve(query_texts, doc_texts_all, top_k=bm25_top_k, model_name=rerank_model)
+    ranked_paths.append(dense_ranked)
+    weights.append(w_dense)
+
+    # Path C: N-gram (optional)
+    if w_ngram > 0:
+        log.info("融合-路径C: N-gram 字面匹配 …")
+        ngram_ranked = _ngram_retrieve(query_texts, doc_texts_all, top_k=bm25_top_k)
+        ranked_paths.append(ngram_ranked)
+        weights.append(w_ngram)
+
+    # Weighted RRF fusion
+    log.info("加权 RRF 融合 (weights: BM25=%.1f Dense=%.1f Ngram=%.1f) …",
+             w_bm25, w_dense, w_ngram)
+    fused_df = _reciprocal_rank_fusion(ranked_paths, top_n=final_top_k, weights=weights)
+
+    # Rerank (optional)
+    if rerank:
+        log.info("加载候选文档文本用于密集重排序 …")
+        candidate_docnos = set(fused_df["docno"].tolist())
+        doc_texts_subset = {doc_id: doc_texts_all.get(doc_id, "") for doc_id in candidate_docnos}
+        final_df = _dense_rerank(
+            fused_df,
+            query_texts=query_texts,
+            doc_texts=doc_texts_subset,
+            top_n=final_top_k,
+            model_name=rerank_model,
+        )
+    else:
+        final_df = fused_df.sort_values("score", ascending=False)
+        final_df = final_df.groupby("qid").head(final_top_k).reset_index(drop=True)
+        final_df["rank"] = final_df.groupby("qid").cumcount()
+
+    _write_trec_run(final_df, output_file, system_tag=system_tag)
+    log.info("完成！共写出 %d 条结果。", len(final_df))
+
+
 def _reciprocal_rank_fusion(
     ranked_lists: List[pd.DataFrame],
     k: int = 60,
     top_n: int = 200,
+    weights: Optional[List[float]] = None,
 ) -> pd.DataFrame:
     """
     Reciprocal Rank Fusion（RRF）融合多组排名结果。
@@ -264,6 +353,8 @@ def _reciprocal_rank_fusion(
         RRF 公式中的平滑常数（通常取 60）。
     top_n : int
         每个 qid 保留的最大文档数。
+    weights : List[float] or None
+        每路检索的权重。None 表示等权重。
 
     返回
     ----
@@ -271,14 +362,17 @@ def _reciprocal_rank_fusion(
     """
     from collections import defaultdict
 
+    if weights is None:
+        weights = [1.0] * len(ranked_lists)
+
     scores: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
 
-    for df in ranked_lists:
+    for w, df in zip(weights, ranked_lists):
         for _, row in df.iterrows():
             qid = str(row["qid"])
             docno = str(row["docno"])
-            rank = int(row["rank"]) + 1  # Convert 0-based rank to 1-based rank for the RRF formula: 1/(k + rank)
-            scores[qid][docno] += 1.0 / (k + rank)
+            rank = int(row["rank"]) + 1
+            scores[qid][docno] += w / (k + rank)
 
     rows = []
     for qid, doc_scores in scores.items():
@@ -499,12 +593,17 @@ def process_dataset(
     force: bool = False,
     dense_only: bool = False,
     ngram_only: bool = False,
+    fusion_dense: bool = False,
+    fusion_ngram: bool = False,
+    w_bm25: float = 0.3,
+    w_dense: float = 0.5,
+    w_ngram: float = 0.2,
 ) -> None:
     """
     检索流水线：
     - 默认：BM25 多子查询 + RRF → （可选）密集重排序 → TREC 输出
-    - dense_only：纯 dense 向量检索 → TREC 输出
-    - ngram_only：纯 n-gram 字面匹配检索 → TREC 输出
+    - dense_only / ngram_only：纯单路检索
+    - fusion_dense / fusion_ngram：多路加权融合
     """
     import pyterrier as pt
 
@@ -555,6 +654,26 @@ def process_dataset(
         log.info("写出 TREC run 到：%s", output_file)
         _write_trec_run(final_df, output_file, system_tag=f"{system_tag}-ngram")
         log.info("完成！共写出 %d 条结果。", len(final_df))
+        return
+
+    # --- Fusion 模式 ---
+    if fusion_dense or fusion_ngram:
+        _run_fusion_pipeline(
+            ir_dataset=ir_dataset,
+            index_directory=index_directory,
+            output_file=output_file,
+            query_texts=query_texts,
+            n_sub_queries=n_sub_queries,
+            sub_query_tokens=sub_query_tokens,
+            bm25_top_k=bm25_top_k,
+            final_top_k=final_top_k,
+            rerank=rerank,
+            rerank_model=rerank_model,
+            system_tag=system_tag,
+            w_bm25=w_bm25,
+            w_dense=w_dense,
+            w_ngram=w_ngram if fusion_ngram else 0.0,
+        )
         return
 
     # 2. 构建/加载 BM25 索引
@@ -738,6 +857,37 @@ def _write_trec_run(
     is_flag=True,
     help="仅使用 n-gram 字面匹配检索，用于独立评测 n-gram 通路。",
 )
+@click.option(
+    "--fusion-dense",
+    is_flag=True,
+    help="BM25 + Dense 双路加权融合模式。",
+)
+@click.option(
+    "--fusion-ngram",
+    is_flag=True,
+    help="在双路基础上加入 N-gram，三路加权融合模式。",
+)
+@click.option(
+    "--w-bm25",
+    type=float,
+    default=0.3,
+    show_default=True,
+    help="融合时 BM25 的权重。",
+)
+@click.option(
+    "--w-dense",
+    type=float,
+    default=0.5,
+    show_default=True,
+    help="融合时 Dense 的权重。",
+)
+@click.option(
+    "--w-ngram",
+    type=float,
+    default=0.2,
+    show_default=True,
+    help="融合时 N-gram 的权重。",
+)
 def main(
     dataset: str,
     output: Path,
@@ -752,6 +902,11 @@ def main(
     force: bool,
     dense_only: bool,
     ngram_only: bool,
+    fusion_dense: bool,
+    fusion_ngram: bool,
+    w_bm25: float,
+    w_dense: float,
+    w_ngram: float,
 ) -> None:
     """PAN 2026 生成式剽窃检测 —— 改进检索系统。"""
     import pyterrier as pt
@@ -774,6 +929,11 @@ def main(
         force=force,
         dense_only=dense_only,
         ngram_only=ngram_only,
+        fusion_dense=fusion_dense,
+        fusion_ngram=fusion_ngram,
+        w_bm25=w_bm25,
+        w_dense=w_dense,
+        w_ngram=w_ngram,
     )
 
 
