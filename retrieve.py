@@ -531,7 +531,7 @@ def _dense_retrieve(
     log.info("Dense 检索：加载模型 %s", model_name)
     device = "cuda" if _cuda_available() else "cpu"
     if os.environ.get("PAN_MODEL"):
-        model = SentenceTransformer(os.environ["PAN_MODEL"], device=device, local_files_only=True)
+        model = SentenceTransformer(os.environ["PAN_MODEL"], device=device)
     else:
         model = SentenceTransformer(model_name, device=device)
 
@@ -636,7 +636,7 @@ def _dense_rerank(
     log.info("加载 sentence-transformer 模型：%s", model_name)
     device = "cuda" if _cuda_available() else "cpu"
     if os.environ.get("PAN_MODEL"):
-        model = SentenceTransformer(os.environ["PAN_MODEL"], device=device, local_files_only=True)
+        model = SentenceTransformer(os.environ["PAN_MODEL"], device=device)
     else:
         model = SentenceTransformer(model_name, device=device)
 
