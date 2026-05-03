@@ -1033,6 +1033,8 @@ def main(
     w_dense: float,
     w_ngram: float,
     cross_encoder: bool,
+    dense_chunk_size: int,
+    dense_chunk_overlap: int,
 ) -> None:
     """PAN 2026 生成式剽窃检测 —— 改进检索系统。"""
     import pyterrier as pt
