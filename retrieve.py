@@ -194,32 +194,56 @@ def _get_or_build_index(ir_dataset, index_directory: Path):
 
 def _make_sub_queries(query_text: str, n_chunks: int = 5, max_tokens: int = 64) -> List[str]:
     """
-    将长文档切分为若干代表性子查询片段。
+    将长文档切分为若干最具区分力的子查询片段。
 
     策略
     ----
-    1. 将文档拆成句子列表
-    2. 均匀采样 ``n_chunks`` 组句子区间
-    3. 每组合并后截断到 ``max_tokens`` 个词（BM25 对极长查询不友好）
+    1. 拆成句子，用 TF-IDF 风格打分：关键词密度 × 区分度
+    2. 取 top-n 个最高分句子
+    3. 截断到 max_tokens
     """
+    from nltk.corpus import stopwords as nltk_stopwords
+
     sentences = sent_tokenize(query_text)
     if not sentences:
         return [query_text[:500]]
 
     if len(sentences) <= n_chunks:
-        chunks = [" ".join(sentences)]
-    else:
-        step = max(1, len(sentences) // n_chunks)
-        chunks = []
-        for start in range(0, len(sentences), step):
-            chunk = " ".join(sentences[start: start + max(1, step)])
-            chunks.append(chunk)
-        chunks = chunks[:n_chunks]
+        words = query_text.split()
+        return [" ".join(words[:max_tokens])]
 
-    # 截断每个子查询
+    try:
+        _stopwords = set(nltk_stopwords.words("english"))
+    except Exception:
+        _stopwords = {"the", "a", "an", "is", "are", "was", "were", "of", "in", "to",
+                      "and", "or", "for", "with", "on", "at", "by", "from", "that",
+                      "this", "it", "as", "be", "been", "has", "have", "had", "not"}
+
+    # Score each sentence: info_density × distinctiveness
+    # info_density = meaningful_tokens / total_tokens
+    # distinctiveness = average word length of meaningful tokens
+    scored = []
+    for i, sent in enumerate(sentences):
+        tokens = [w.lower().strip(",.!?;:()[]\"'") for w in sent.split()]
+        meaningful = [w for w in tokens if w not in _stopwords and len(w) > 1]
+        if not meaningful:
+            scored.append((i, 0.0, sent))
+            continue
+        info_density = len(meaningful) / max(len(tokens), 1)
+        avg_len = sum(len(w) for w in meaningful) / max(len(meaningful), 1)
+        distinctiveness = min(avg_len / 8.0, 1.0)  # normalize, cap at 1.0
+        score = info_density * 0.6 + distinctiveness * 0.4 + (0.1 if i < 3 else 0.0)  # bonus for early sentences (often intro)
+        scored.append((i, score, sent))
+
+    # Select top n by score, preserve original order
+    scored.sort(key=lambda x: x[1], reverse=True)
+    top_indices = sorted([s[0] for s in scored[:n_chunks]])
+    selected = [sentences[i] for i in top_indices]
+
+    # Truncate each
     result = []
-    for chunk in chunks:
-        words = chunk.split()
+    for sent in selected:
+        words = sent.split()
         result.append(" ".join(words[:max_tokens]))
     return result
 
@@ -513,8 +537,9 @@ def _cross_encoder_rerank(
     """用 cross-encoder 对候选文档精细打分。"""
     from sentence_transformers import CrossEncoder
 
-    log.info("Cross-encoder 精排：加载模型 %s", model_name)
-    model = CrossEncoder(model_name)
+    model_path = os.environ.get("PAN_CROSS_ENCODER", model_name)
+    log.info("Cross-encoder 精排：加载模型 %s", model_path)
+    model = CrossEncoder(model_path)
 
     rows = []
     qids = candidates_df["qid"].unique()

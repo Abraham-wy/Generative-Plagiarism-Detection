@@ -17,9 +17,12 @@ RUN python -m nltk.downloader punkt punkt_tab stopwords
 RUN python -c "import pyterrier as pt; pt.init()"
 
 RUN python - <<'PY'
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 SentenceTransformer("all-MiniLM-L6-v2").save("/models/all-MiniLM-L6-v2")
+CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2").save("/models/cross-encoder-msmarco")
 PY
+
+ENV PAN_CROSS_ENCODER=/models/cross-encoder-msmarco
 
 COPY retrieve.py ./retrieve.py
 
