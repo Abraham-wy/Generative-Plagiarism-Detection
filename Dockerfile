@@ -27,5 +27,4 @@ ENV PAN_MODEL=/models/multi-qa-mpnet
 
 COPY retrieve.py ./retrieve.py
 
-ENTRYPOINT ["python", "/app/retrieve.py"]
-CMD ["--dataset", "$inputDataset", "--index", "/tmp/indexes", "--output", "$outputDir"]
+ENTRYPOINT python /app/retrieve.py --dataset $inputDataset --index /tmp/indexes --output $outputDir
