@@ -81,6 +81,30 @@ def _rr(ranked_docs: list[str], rels: dict[str, float]) -> float:
     return 0.0
 
 
+def _average_precision(ranked_docs: list[str], rels: dict[str, float]) -> float:
+    num_relevant = sum(1 for rel in rels.values() if rel > 0)
+    if num_relevant == 0:
+        return 0.0
+    hit = 0
+    precision_sum = 0.0
+    for idx, doc_id in enumerate(ranked_docs, start=1):
+        if rels.get(doc_id, 0.0) > 0:
+            hit += 1
+            precision_sum += hit / idx
+    return precision_sum / num_relevant
+
+
+def _precision_at(ranked_docs: list[str], rels: dict[str, float], k: int) -> float:
+    if k <= 0:
+        return 0.0
+    hits = sum(1 for doc_id in ranked_docs[:k] if rels.get(doc_id, 0.0) > 0)
+    return hits / k
+
+
+def _mrr(ranked_docs: list[str], rels: dict[str, float]) -> float:
+    return _rr(ranked_docs, rels)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate PAN retrieval metrics from qrels.")
     parser.add_argument("--run", type=Path, required=True)
@@ -94,7 +118,10 @@ def main() -> int:
         "nDCG@10": [],
         "Recall@10": [],
         "Recall@100": [],
-        "RR": [],
+        "MRR": [],
+        "MAP": [],
+        "P@5": [],
+        "P@20": [],
     }
 
     for qid in qids:
@@ -103,7 +130,10 @@ def main() -> int:
         metrics["nDCG@10"].append(_ndcg_at(ranked_docs, rels, 10))
         metrics["Recall@10"].append(_recall_at(ranked_docs, rels, 10))
         metrics["Recall@100"].append(_recall_at(ranked_docs, rels, 100))
-        metrics["RR"].append(_rr(ranked_docs, rels))
+        metrics["MRR"].append(_mrr(ranked_docs, rels))
+        metrics["MAP"].append(_average_precision(ranked_docs, rels))
+        metrics["P@5"].append(_precision_at(ranked_docs, rels, 5))
+        metrics["P@20"].append(_precision_at(ranked_docs, rels, 20))
 
     for name, values in metrics.items():
         mean = sum(values) / len(values) if values else 0.0
