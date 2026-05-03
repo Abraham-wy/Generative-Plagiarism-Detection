@@ -290,6 +290,51 @@ def _reciprocal_rank_fusion(
 
 
 # ---------------------------------------------------------------------------
+# 密集向量检索（独立通路，不依赖 BM25）
+# ---------------------------------------------------------------------------
+
+def _dense_retrieve(
+    query_texts: dict[str, str],
+    doc_texts: dict[str, str],
+    top_k: int = 200,
+    model_name: str = "all-MiniLM-L6-v2",
+) -> pd.DataFrame:
+    """
+    纯 dense 向量检索：编码所有文档和查询，余弦相似度召回 top-k。
+    """
+    from sentence_transformers import SentenceTransformer
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    log.info("Dense 检索：加载模型 %s", model_name)
+    device = "cuda" if _cuda_available() else "cpu"
+    if os.environ.get("PAN_MODEL"):
+        model = SentenceTransformer(os.environ["PAN_MODEL"], device=device, local_files_only=True)
+    else:
+        model = SentenceTransformer(model_name, device=device)
+
+    doc_ids = list(doc_texts.keys())
+    doc_contents = [doc_texts[d][:2048] for d in doc_ids]
+    log.info("编码 %d 篇文档 …", len(doc_ids))
+    doc_embeddings = model.encode(doc_contents, show_progress_bar=True, batch_size=128)
+
+    rows = []
+    for qid, q_text in query_texts.items():
+        q_words = q_text.split()
+        q_text_trunc = " ".join(q_words[:256])
+        q_emb = model.encode([q_text_trunc], show_progress_bar=False)
+        sims = cosine_similarity(q_emb, doc_embeddings)[0]
+        top_idx = np.argsort(sims)[::-1][:top_k]
+        for rank, idx in enumerate(top_idx):
+            rows.append({
+                "qid": qid,
+                "docno": doc_ids[idx],
+                "score": float(sims[idx]),
+                "rank": rank,
+            })
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
 # 密集向量重排序
 # ---------------------------------------------------------------------------
 
@@ -391,9 +436,12 @@ def process_dataset(
     rerank_model: str = "all-MiniLM-L6-v2",
     system_tag: str = "pan26-retrieval",
     force: bool = False,
+    dense_only: bool = False,
 ) -> None:
     """
-    完整检索流水线：BM25 多子查询 + RRF → （可选）密集重排序 → TREC 输出。
+    检索流水线：
+    - 默认：BM25 多子查询 + RRF → （可选）密集重排序 → TREC 输出
+    - dense_only：纯 dense 向量检索 → TREC 输出
     """
     import pyterrier as pt
 
@@ -407,15 +455,32 @@ def process_dataset(
 
     output_directory.mkdir(parents=True, exist_ok=True)
 
-    # 1. 构建/加载 BM25 索引
-    index = _get_or_build_index(ir_dataset, index_directory)
-    bm25 = pt.terrier.Retriever(index, wmodel="BM25", num_results=bm25_top_k)
-
-    # 2. 加载所有查询
+    # 1. 加载所有查询
     log.info("加载查询文档 …")
     query_records = list(ir_dataset.queries_iter())
     query_texts: dict[str, str] = {q.query_id: q.default_text() for q in query_records}
     log.info("共 %d 条查询。", len(query_records))
+
+    # --- Dense-only 通路 ---
+    if dense_only:
+        log.info("纯 dense 向量检索模式 …")
+        doc_texts_all: dict[str, str] = {}
+        for d in ir_dataset.docs_iter():
+            doc_texts_all[d.doc_id] = d.default_text()
+        final_df = _dense_retrieve(
+            query_texts=query_texts,
+            doc_texts=doc_texts_all,
+            top_k=final_top_k,
+            model_name=rerank_model,
+        )
+        log.info("写出 TREC run 到：%s", output_file)
+        _write_trec_run(final_df, output_file, system_tag=f"{system_tag}-dense")
+        log.info("完成！共写出 %d 条结果。", len(final_df))
+        return
+
+    # 2. 构建/加载 BM25 索引
+    index = _get_or_build_index(ir_dataset, index_directory)
+    bm25 = pt.terrier.Retriever(index, wmodel="BM25", num_results=bm25_top_k)
 
     # 3. 多子查询 BM25 检索
     log.info("执行多子查询 BM25 检索（n_sub_queries=%d, top_k=%d） …",
@@ -584,6 +649,11 @@ def _write_trec_run(
     is_flag=True,
     help="如果输出目录中已存在 run.txt.gz，则覆盖它并重新运行。",
 )
+@click.option(
+    "--dense-only",
+    is_flag=True,
+    help="仅使用 dense 向量检索（不经过 BM25），用于独立评测 dense 通路。",
+)
 def main(
     dataset: str,
     output: Path,
@@ -596,6 +666,7 @@ def main(
     rerank_model: str,
     tag: str,
     force: bool,
+    dense_only: bool,
 ) -> None:
     """PAN 2026 生成式剽窃检测 —— 改进检索系统。"""
     import pyterrier as pt
@@ -616,6 +687,7 @@ def main(
         rerank_model=rerank_model,
         system_tag=tag,
         force=force,
+        dense_only=dense_only,
     )
 
 
