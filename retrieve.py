@@ -482,6 +482,25 @@ def _ngram_retrieve(
 # 密集向量检索（独立通路，不依赖 BM25）
 # ---------------------------------------------------------------------------
 
+def _encode_query_weighted(text: str, model) -> np.ndarray:
+    """查询编码：头(摘要)权重0.5、中(方法)0.2、尾(结论)0.3 加权 pooling。"""
+    words = text.split()
+    n = len(words)
+    if n <= 512:
+        return _encode_chunks(text, model)
+
+    head = " ".join(words[:min(500, n // 3)])
+    mid_start = n // 3
+    mid = " ".join(words[mid_start:mid_start + min(500, n // 3)])
+    tail = " ".join(words[-min(500, n // 3):])
+
+    h_emb = model.encode([head], show_progress_bar=False)[0]
+    m_emb = model.encode([mid], show_progress_bar=False)[0]
+    t_emb = model.encode([tail], show_progress_bar=False)[0]
+
+    return h_emb * 0.5 + m_emb * 0.2 + t_emb * 0.3
+
+
 def _encode_chunks(text: str, model, chunk_size: int = 256, overlap: int = 64) -> np.ndarray:
     """将长文本分块编码后 mean pooling，返回单条 embedding。"""
     words = text.split()
@@ -522,7 +541,7 @@ def _dense_retrieve(
 
     rows = []
     for qid, q_text in query_texts.items():
-        q_emb = _encode_chunks(q_text, model).reshape(1, -1)
+        q_emb = _encode_query_weighted(q_text, model).reshape(1, -1)
         sims = cosine_similarity(q_emb, doc_embeddings)[0]
         top_idx = np.argsort(sims)[::-1][:top_k]
         for rank, idx in enumerate(top_idx):
@@ -632,7 +651,7 @@ def _dense_rerank(
         if not doc_ids:
             continue
 
-        q_emb = _encode_chunks(q_text, model).reshape(1, -1)
+        q_emb = _encode_query_weighted(q_text, model).reshape(1, -1)
         q_emb = q_emb / np.linalg.norm(q_emb)
         d_embs = np.stack([_encode_chunks(doc_texts.get(str(d), ""), model) for d in doc_ids])
         d_embs = d_embs / np.linalg.norm(d_embs, axis=1, keepdims=True)
