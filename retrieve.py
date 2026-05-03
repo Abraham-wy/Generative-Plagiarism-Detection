@@ -520,7 +520,7 @@ def _dense_retrieve(
     query_texts: dict[str, str],
     doc_texts: dict[str, str],
     top_k: int = 200,
-    model_name: str = "all-MiniLM-L6-v2",
+    model_name: str = "multi-qa-mpnet-base-dot-v1",
 ) -> pd.DataFrame:
     """
     纯 dense 向量检索：全文档 chunk-based mean pooling 编码，余弦相似度召回 top-k。
@@ -937,7 +937,7 @@ def _write_trec_run(
 @click.option(
     "--rerank-model",
     type=str,
-    default="all-MiniLM-L6-v2",
+    default="multi-qa-mpnet-base-dot-v1",
     show_default=True,
     help="密集重排序使用的 sentence-transformers 模型名称。",
 )
@@ -998,6 +998,20 @@ def _write_trec_run(
     "--cross-encoder",
     is_flag=True,
     help="使用 cross-encoder 做最终精排（替代 bi-encoder 余弦相似度）。",
+)
+@click.option(
+    "--dense-chunk-size",
+    type=int,
+    default=256,
+    show_default=True,
+    help="Dense 编码时分块大小（词数）。",
+)
+@click.option(
+    "--dense-chunk-overlap",
+    type=int,
+    default=64,
+    show_default=True,
+    help="Dense 编码时分块重叠（词数）。",
 )
 def main(
     dataset: str,

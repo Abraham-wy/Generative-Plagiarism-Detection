@@ -18,11 +18,12 @@ RUN python -c "import pyterrier as pt; pt.init()"
 
 RUN python - <<'PY'
 from sentence_transformers import SentenceTransformer, CrossEncoder
-SentenceTransformer("all-MiniLM-L6-v2").save("/models/all-MiniLM-L6-v2")
+SentenceTransformer("multi-qa-mpnet-base-dot-v1").save("/models/multi-qa-mpnet")
 CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2").save("/models/cross-encoder-msmarco")
 PY
 
 ENV PAN_CROSS_ENCODER=/models/cross-encoder-msmarco
+ENV PAN_MODEL=/models/multi-qa-mpnet
 
 COPY retrieve.py ./retrieve.py
 
