@@ -482,6 +482,21 @@ def _ngram_retrieve(
 # 密集向量检索（独立通路，不依赖 BM25）
 # ---------------------------------------------------------------------------
 
+def _encode_chunks(text: str, model, chunk_size: int = 256, overlap: int = 64) -> np.ndarray:
+    """将长文本分块编码后 mean pooling，返回单条 embedding。"""
+    words = text.split()
+    if len(words) <= chunk_size:
+        return model.encode([" ".join(words)], show_progress_bar=False)[0]
+    chunks = []
+    start = 0
+    while start < len(words):
+        chunk = " ".join(words[start:start + chunk_size])
+        chunks.append(chunk)
+        start += chunk_size - overlap
+    emb = model.encode(chunks, show_progress_bar=False)
+    return emb.mean(axis=0)
+
+
 def _dense_retrieve(
     query_texts: dict[str, str],
     doc_texts: dict[str, str],
@@ -489,7 +504,7 @@ def _dense_retrieve(
     model_name: str = "all-MiniLM-L6-v2",
 ) -> pd.DataFrame:
     """
-    纯 dense 向量检索：编码所有文档和查询，余弦相似度召回 top-k。
+    纯 dense 向量检索：全文档 chunk-based mean pooling 编码，余弦相似度召回 top-k。
     """
     from sentence_transformers import SentenceTransformer
     from sklearn.metrics.pairwise import cosine_similarity
@@ -502,15 +517,12 @@ def _dense_retrieve(
         model = SentenceTransformer(model_name, device=device)
 
     doc_ids = list(doc_texts.keys())
-    doc_contents = [doc_texts[d][:2048] for d in doc_ids]
-    log.info("编码 %d 篇文档 …", len(doc_ids))
-    doc_embeddings = model.encode(doc_contents, show_progress_bar=True, batch_size=128)
+    log.info("编码 %d 篇文档 (chunk-based mean pooling) …", len(doc_ids))
+    doc_embeddings = np.stack([_encode_chunks(doc_texts[d], model) for d in doc_ids])
 
     rows = []
     for qid, q_text in query_texts.items():
-        q_words = q_text.split()
-        q_text_trunc = " ".join(q_words[:256])
-        q_emb = model.encode([q_text_trunc], show_progress_bar=False)
+        q_emb = _encode_chunks(q_text, model).reshape(1, -1)
         sims = cosine_similarity(q_emb, doc_embeddings)[0]
         top_idx = np.argsort(sims)[::-1][:top_k]
         for rank, idx in enumerate(top_idx):
@@ -616,18 +628,14 @@ def _dense_rerank(
         cand = candidates_df[candidates_df["qid"] == qid].copy()
         q_text = query_texts.get(str(qid), "")
 
-        # 截断查询（避免过长影响编码速度）
-        q_words = q_text.split()
-        q_text_trunc = " ".join(q_words[:256])
-
         doc_ids = cand["docno"].tolist()
-        doc_texts_list = [doc_texts.get(str(d), "")[:2048] for d in doc_ids]
-
-        if not doc_texts_list:
+        if not doc_ids:
             continue
 
-        q_emb = model.encode([q_text_trunc], batch_size=1, normalize_embeddings=True)
-        d_embs = model.encode(doc_texts_list, batch_size=batch_size, normalize_embeddings=True, show_progress_bar=False)
+        q_emb = _encode_chunks(q_text, model).reshape(1, -1)
+        q_emb = q_emb / np.linalg.norm(q_emb)
+        d_embs = np.stack([_encode_chunks(doc_texts.get(str(d), ""), model) for d in doc_ids])
+        d_embs = d_embs / np.linalg.norm(d_embs, axis=1, keepdims=True)
 
         sims = cosine_similarity(q_emb, d_embs)[0]
 
