@@ -263,6 +263,7 @@ def _run_fusion_pipeline(
     w_bm25: float,
     w_dense: float,
     w_ngram: float,
+    cross_encoder: bool = False,
 ) -> None:
     """三路加权融合流水线：BM25 + Dense + N-gram 可选 → RRF → rerank。"""
     import pyterrier as pt
@@ -317,16 +318,25 @@ def _run_fusion_pipeline(
 
     # Rerank (optional)
     if rerank:
-        log.info("加载候选文档文本用于密集重排序 …")
         candidate_docnos = set(fused_df["docno"].tolist())
         doc_texts_subset = {doc_id: doc_texts_all.get(doc_id, "") for doc_id in candidate_docnos}
-        final_df = _dense_rerank(
-            fused_df,
-            query_texts=query_texts,
-            doc_texts=doc_texts_subset,
-            top_n=final_top_k,
-            model_name=rerank_model,
-        )
+        if cross_encoder:
+            log.info("使用 cross-encoder 精排 …")
+            final_df = _cross_encoder_rerank(
+                fused_df,
+                query_texts=query_texts,
+                doc_texts=doc_texts_subset,
+                top_n=final_top_k,
+            )
+        else:
+            log.info("加载候选文档文本用于密集重排序 …")
+            final_df = _dense_rerank(
+                fused_df,
+                query_texts=query_texts,
+                doc_texts=doc_texts_subset,
+                top_n=final_top_k,
+                model_name=rerank_model,
+            )
     else:
         final_df = fused_df.sort_values("score", ascending=False)
         final_df = final_df.groupby("qid").head(final_top_k).reset_index(drop=True)
@@ -490,6 +500,47 @@ def _dense_retrieve(
 
 
 # ---------------------------------------------------------------------------
+# Cross-encoder 精排
+# ---------------------------------------------------------------------------
+
+def _cross_encoder_rerank(
+    candidates_df: pd.DataFrame,
+    query_texts: dict[str, str],
+    doc_texts: dict[str, str],
+    top_n: int = 1000,
+    model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+) -> pd.DataFrame:
+    """用 cross-encoder 对候选文档精细打分。"""
+    from sentence_transformers import CrossEncoder
+
+    log.info("Cross-encoder 精排：加载模型 %s", model_name)
+    model = CrossEncoder(model_name)
+
+    rows = []
+    qids = candidates_df["qid"].unique()
+    for qid in qids:
+        cand = candidates_df[candidates_df["qid"] == qid].copy()
+        q_text = query_texts.get(str(qid), "")
+        q_words = q_text.split()
+        q_text_trunc = " ".join(q_words[:256])
+
+        doc_ids = cand["docno"].tolist()
+        pairs = [(q_text_trunc, doc_texts.get(str(d), "")[:2048]) for d in doc_ids]
+        scores = model.predict(pairs, show_progress_bar=False)
+
+        cand["cross_score"] = scores
+        cand = cand.sort_values("cross_score", ascending=False).head(top_n)
+        for rank, (_, row) in enumerate(cand.iterrows()):
+            rows.append({
+                "qid": qid,
+                "docno": row["docno"],
+                "score": float(row["cross_score"]),
+                "rank": rank,
+            })
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
 # 密集向量重排序
 # ---------------------------------------------------------------------------
 
@@ -598,12 +649,14 @@ def process_dataset(
     w_bm25: float = 0.3,
     w_dense: float = 0.5,
     w_ngram: float = 0.2,
+    cross_encoder: bool = False,
 ) -> None:
     """
     检索流水线：
     - 默认：BM25 多子查询 + RRF → （可选）密集重排序 → TREC 输出
     - dense_only / ngram_only：纯单路检索
     - fusion_dense / fusion_ngram：多路加权融合
+    - cross_encoder：用 cross-encoder 替换 bi-encoder 精排
     """
     import pyterrier as pt
 
@@ -673,6 +726,7 @@ def process_dataset(
             w_bm25=w_bm25,
             w_dense=w_dense,
             w_ngram=w_ngram if fusion_ngram else 0.0,
+            cross_encoder=cross_encoder,
         )
         return
 
@@ -888,6 +942,11 @@ def _write_trec_run(
     show_default=True,
     help="融合时 N-gram 的权重。",
 )
+@click.option(
+    "--cross-encoder",
+    is_flag=True,
+    help="使用 cross-encoder 做最终精排（替代 bi-encoder 余弦相似度）。",
+)
 def main(
     dataset: str,
     output: Path,
@@ -907,6 +966,7 @@ def main(
     w_bm25: float,
     w_dense: float,
     w_ngram: float,
+    cross_encoder: bool,
 ) -> None:
     """PAN 2026 生成式剽窃检测 —— 改进检索系统。"""
     import pyterrier as pt
@@ -934,6 +994,7 @@ def main(
         w_bm25=w_bm25,
         w_dense=w_dense,
         w_ngram=w_ngram,
+        cross_encoder=cross_encoder,
     )
 
 
