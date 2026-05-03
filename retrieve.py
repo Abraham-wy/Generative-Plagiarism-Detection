@@ -290,6 +290,67 @@ def _reciprocal_rank_fusion(
 
 
 # ---------------------------------------------------------------------------
+# N-gram 字面匹配检索（独立通路，检测逐字抄袭）
+# ---------------------------------------------------------------------------
+
+def _build_ngram_index(doc_texts: dict[str, str], n: int = 5) -> dict[str, set[str]]:
+    """构建 n-gram 倒排索引：ngram → {doc_id, ...}"""
+    from collections import defaultdict
+    index: defaultdict[str, set[str]] = defaultdict(set)
+    for doc_id, text in doc_texts.items():
+        text_lower = text.lower()
+        for i in range(len(text_lower) - n + 1):
+            ngram = text_lower[i:i + n]
+            index[ngram].add(doc_id)
+    return dict(index)
+
+
+def _ngram_retrieve(
+    query_texts: dict[str, str],
+    doc_texts: dict[str, str],
+    top_k: int = 200,
+    n: int = 5,
+) -> pd.DataFrame:
+    """
+    纯 n-gram 字面匹配检索：倒排索引 + Jaccard 重叠评分。
+    """
+    log.info("N-gram 检索：构建 %d-gram 倒排索引 …", n)
+    ngram_index = _build_ngram_index(doc_texts, n=n)
+    log.info("倒排索引包含 %d 个 n-gram。", len(ngram_index))
+
+    rows = []
+    for qid, q_text in query_texts.items():
+        text_lower = q_text.lower()
+        q_ngrams = set()
+        for i in range(len(text_lower) - n + 1):
+            q_ngrams.add(text_lower[i:i + n])
+
+        if not q_ngrams:
+            continue
+
+        doc_scores: dict[str, float] = {}
+        for ng in q_ngrams:
+            for doc_id in ngram_index.get(ng, set()):
+                doc_scores[doc_id] = doc_scores.get(doc_id, 0.0) + 1.0
+
+        if not doc_scores:
+            continue
+
+        # Normalize by query n-gram count → Jaccard-like overlap ratio
+        q_len = len(q_ngrams)
+        sorted_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
+        for rank, (doc_id, score) in enumerate(sorted_docs[:top_k]):
+            rows.append({
+                "qid": qid,
+                "docno": doc_id,
+                "score": score / q_len,  # normalized overlap ratio
+                "rank": rank,
+            })
+
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
 # 密集向量检索（独立通路，不依赖 BM25）
 # ---------------------------------------------------------------------------
 
@@ -437,11 +498,13 @@ def process_dataset(
     system_tag: str = "pan26-retrieval",
     force: bool = False,
     dense_only: bool = False,
+    ngram_only: bool = False,
 ) -> None:
     """
     检索流水线：
     - 默认：BM25 多子查询 + RRF → （可选）密集重排序 → TREC 输出
     - dense_only：纯 dense 向量检索 → TREC 输出
+    - ngram_only：纯 n-gram 字面匹配检索 → TREC 输出
     """
     import pyterrier as pt
 
@@ -475,6 +538,22 @@ def process_dataset(
         )
         log.info("写出 TREC run 到：%s", output_file)
         _write_trec_run(final_df, output_file, system_tag=f"{system_tag}-dense")
+        log.info("完成！共写出 %d 条结果。", len(final_df))
+        return
+
+    # --- N-gram-only 通路 ---
+    if ngram_only:
+        log.info("纯 n-gram 字面匹配检索模式 …")
+        doc_texts_all: dict[str, str] = {}
+        for d in ir_dataset.docs_iter():
+            doc_texts_all[d.doc_id] = d.default_text()
+        final_df = _ngram_retrieve(
+            query_texts=query_texts,
+            doc_texts=doc_texts_all,
+            top_k=final_top_k,
+        )
+        log.info("写出 TREC run 到：%s", output_file)
+        _write_trec_run(final_df, output_file, system_tag=f"{system_tag}-ngram")
         log.info("完成！共写出 %d 条结果。", len(final_df))
         return
 
@@ -654,6 +733,11 @@ def _write_trec_run(
     is_flag=True,
     help="仅使用 dense 向量检索（不经过 BM25），用于独立评测 dense 通路。",
 )
+@click.option(
+    "--ngram-only",
+    is_flag=True,
+    help="仅使用 n-gram 字面匹配检索，用于独立评测 n-gram 通路。",
+)
 def main(
     dataset: str,
     output: Path,
@@ -667,6 +751,7 @@ def main(
     tag: str,
     force: bool,
     dense_only: bool,
+    ngram_only: bool,
 ) -> None:
     """PAN 2026 生成式剽窃检测 —— 改进检索系统。"""
     import pyterrier as pt
@@ -688,6 +773,7 @@ def main(
         system_tag=tag,
         force=force,
         dense_only=dense_only,
+        ngram_only=ngram_only,
     )
 
 
