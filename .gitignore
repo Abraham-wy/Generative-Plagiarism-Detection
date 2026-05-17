@@ -1,0 +1,12 @@
+data/
+pan25/
+pan26/
+pan14-source-retrieval-training-corpus-2014-12-01/
+pan12-source-retrieval-test-and-training/
+pan13-source-retrieval-test-and-training/
+2012-2015paper/
+*.zip
+__pycache__/
+*.pyc
+.npm-global/
+outputs/
