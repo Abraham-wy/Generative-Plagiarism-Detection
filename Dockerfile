@@ -14,6 +14,7 @@ WORKDIR /app
 COPY scripts/submit_pan26.py /app/
 COPY scripts/query_segment_retrieve.py /app/
 COPY .git /app/.git
+COPY .gitignore /app/
 
 ENV PYTHONUNBUFFERED=1
 
