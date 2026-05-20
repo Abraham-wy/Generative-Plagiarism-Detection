@@ -33,3 +33,4 @@ scripts/query_decompose.py
 scripts/query_optimize.py
 scripts/rerank_jaccard.py
 scripts/targeted_chunk.py
+pan14/
