@@ -65,7 +65,7 @@ def main():
     authors = doc.add_paragraph()
     authors.alignment = WD_ALIGN_PARAGRAPH.CENTER
     authors.paragraph_format.space_after = Pt(2)
-    run = authors.add_run('[学生姓名]¹  [教师姓名]¹,²(通讯作者)  [参与学生姓名]¹')
+    run = authors.add_run('王毅¹  韩中元¹(通讯作者)')
     run.font.name = '宋体'
     run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
     run.font.size = Pt(10.5)
@@ -82,7 +82,7 @@ def main():
     aff2 = doc.add_paragraph()
     aff2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     aff2.paragraph_format.space_after = Pt(2)
-    run = aff2.add_run('2. [通讯作者单位，如与1不同]')
+    run = aff2.add_run('2. 通讯作者，韩中元，[邮箱待填写]')
     run.font.name = '宋体'
     run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
     run.font.size = Pt(9)
@@ -90,7 +90,7 @@ def main():
     email = doc.add_paragraph()
     email.alignment = WD_ALIGN_PARAGRAPH.CENTER
     email.paragraph_format.space_after = Pt(10)
-    run = email.add_run('[通讯作者邮箱]')
+    run = email.add_run('[通讯作者邮箱，请填写]')
     run.font.name = '宋体'
     run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
     run.font.size = Pt(9)
@@ -396,7 +396,7 @@ def main():
     add_heading_styled(doc, '6 致谢', level=1)
 
     add_para(doc, (
-        '本研究受[基金名称]（项目编号：[基金号]）资助。'
+        'This work is supported by the National Social Science Foundation of China (24BYY080). '
         '感谢PAN@CLEF评测组织者提供的数据集和评测平台。'
     ))
 
