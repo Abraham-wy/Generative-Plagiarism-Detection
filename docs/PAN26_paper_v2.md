@@ -42,17 +42,17 @@ PAN@CLEF 2026评测任务[1]中的生成式抄袭检测（Generative Plagiarism 
 
 ### 2.1 抄袭检测中的源检索
 
-源检索是抄袭检测流水线的第一步，其任务是从大规模候选语料库中快速定位可疑文档的潜在来源。自PAN 2014评测[7]设立源检索子任务以来，参与者提出了多种方法。基于词法匹配的方法[3,8]通过词n-gram重叠、指纹（fingerprinting）或BM25等词频统计模型进行检索，在逐字抄袭和轻度改写场景下表现优异。基于语义匹配的方法则利用Sentence-BERT[9]、E5[10]等句子编码器将文本映射到稠密向量空间，通过余弦相似度进行语义级匹配，对改写程度较高的抄袭具有更好的泛化能力。然而，PAN 2025评测报告[1]指出，所有参与团队的方法在跨域泛化（PAN 2015数据集）上均显著下降，说明当前方法对领域偏移的鲁棒性不足。与上述工作不同，本文的方法聚焦于查询侧的结构化建模，从"如何提问"的角度改进检索效果。
+源检索是抄袭检测流水线的第一步，其任务是从大规模候选语料库中快速定位可疑文档的潜在来源。自PAN 2014评测[3]设立源检索子任务以来，参与者提出了多种方法。基于词法匹配的方法[3,7]通过词n-gram重叠、指纹（fingerprinting）或BM25等词频统计模型进行检索，在逐字抄袭和轻度改写场景下表现优异。基于语义匹配的方法则利用Sentence-BERT[8]、E5[9]等句子编码器将文本映射到稠密向量空间，通过余弦相似度进行语义级匹配，对改写程度较高的抄袭具有更好的泛化能力。然而，PAN 2025评测报告[1]指出，所有参与团队的方法在跨域泛化（PAN 2015数据集）上均显著下降，说明当前方法对领域偏移的鲁棒性不足。与上述工作不同，本文的方法聚焦于查询侧的结构化建模，从"如何提问"的角度改进检索效果。
 
 
 ### 2.2 文档切分与多查询检索
 
-对于长文档检索，将文档切分为固定大小的文本块（chunks）分别处理后聚合是常见的做法[11]。在开放域问答中，Karpukhin等人[11]提出的稠密段落检索（DPR）将文档切分为段落级单元进行独立编码与检索，通过最大池化或早期融合聚合结果。然而，该类方法将切分操作应用于文档侧（document side），查询侧仍保持为单一体。这种"文档切分、查询不切分"的策略在查询本身为复合体时无法充分利用切分的优势。查询分解（query decomposition）技术[12]从相反的角度出发，将复杂查询拆分为子查询分别检索再合并结果，但主要面向多跳问答和比较类查询场景，应用于抄袭检测时需要对分段策略进行专门设计。
+对于长文档检索，将文档切分为固定大小的文本块（chunks）分别处理后聚合是常见的做法[10]。在开放域问答中，Karpukhin等人[10]提出的稠密段落检索（DPR）将文档切分为段落级单元进行独立编码与检索，通过最大池化或早期融合聚合结果。然而，该类方法将切分操作应用于文档侧（document side），查询侧仍保持为单一体。这种"文档切分、查询不切分"的策略在查询本身为复合体时无法充分利用切分的优势。查询分解（query decomposition）技术[11]从相反的角度出发，将复杂查询拆分为子查询分别检索再合并结果，但主要面向多跳问答和比较类查询场景，应用于抄袭检测时需要对分段策略进行专门设计。
 
 
 ### 2.3 检索重排序与结果融合
 
-在检索结果融合方面，互惠排名融合（Reciprocal Rank Fusion, RRF）[13]和多阶段级联精排[14]等方法被广泛应用于多路检索结果的合并。然而，这些方法假设各路检索系统接收的是相同的查询输入，仅通过不同的模型或参数产生多样化结果。本文的方法与之有本质区别：各路检索系统接收的是不同的查询输入（查询的不同段落），因此融合策略需要从"多模型融合"转变为"多查询协同"，即对各段结果进行联合推理以重建溯源图。
+在检索结果融合方面，互惠排名融合（Reciprocal Rank Fusion, RRF）[12]和多阶段级联精排[13]等方法被广泛应用于多路检索结果的合并。然而，这些方法假设各路检索系统接收的是相同的查询输入，仅通过不同的模型或参数产生多样化结果。本文的方法与之有本质区别：各路检索系统接收的是不同的查询输入（查询的不同段落），因此融合策略需要从"多模型融合"转变为"多查询协同"，即对各段结果进行联合推理以重建溯源图。
 
 
 ## 3 方法（Method）
@@ -65,7 +65,7 @@ PAN@CLEF 2026评测任务[1]中的生成式抄袭检测（Generative Plagiarism 
 
 ### 3.2 基线方法：标准BM25检索
 
-标准BM25[8]将整篇可疑文档q作为一个完整查询，基于倒排索引（inverted index）进行检索。给定查询q，首先提取其所有词元（tokens），选取逆文档频率（IDF）最高的m个查询词（本文取m=100），遍历每个选中词元的发布列表（posting list），为每个包含查询词的候选文档累加BM25得分。最终返回得分最高的K个文档作为检索结果。BM25的核心公式为：
+标准BM25[7]将整篇可疑文档q作为一个完整查询，基于倒排索引（inverted index）进行检索。给定查询q，首先提取其所有词元（tokens），选取逆文档频率（IDF）最高的m个查询词（本文取m=100），遍历每个选中词元的发布列表（posting list），为每个包含查询词的候选文档累加BM25得分。最终返回得分最高的K个文档作为检索结果。BM25的核心公式为：
 
 Score_BM25(d|q) = Σ_{t∈q} IDF(t) · tf(t,d) · (k₁+1) / (tf(t,d) + k₁ · (1-b + b · |d|/avgdl))
 
@@ -139,7 +139,7 @@ S(c) ≈ Σ_{t∈Top-50(c)} |posting(t)| ≈ 50 × 30,000 = 1,500,000
 
 #### 4.1.4 基线方法
 
-本文设置三类方法进行对比评估：(1) 标准BM25——将整篇可疑文档作为单一查询进行BM25检索，选取IDF最高的100个查询词，返回top-100结果；(2) E5 Chunking[10-11]——使用E5-base-v2对源文档进行256-token切块编码，对BM25盲区查询以块级余弦相似度进行稠密语义补盲，采用Coverage-aware打分（0.5×top1 + 0.3×top5_mean + 0.2×coverage）；(3) 本文方法——查询分段溯源建模（详见第3.3节）。所有方法使用完全相同的倒排索引、BM25参数（k₁=1.2, b=0.75）和语料库预处理流程。
+本文设置三类方法进行对比评估：(1) 标准BM25——将整篇可疑文档作为单一查询进行BM25检索，选取IDF最高的100个查询词，返回top-100结果；(2) E5 Chunking[9-10]——使用E5-base-v2对源文档进行256-token切块编码，对BM25盲区查询以块级余弦相似度进行稠密语义补盲，采用Coverage-aware打分（0.5×top1 + 0.3×top5_mean + 0.2×coverage）；(3) 本文方法——查询分段溯源建模（详见第3.3节）。所有方法使用完全相同的倒排索引、BM25参数（k₁=1.2, b=0.75）和语料库预处理流程。
 
 
 ### 4.2 实验结果
@@ -162,7 +162,7 @@ S(c) ≈ Σ_{t∈Top-50(c)} |posting(t)| ≈ 50 × 30,000 = 1,500,000
 **表4  预留验证集上的源检索实验结果（holdout, 5,522条查询，7,949篇文档）**
 
 
-表4报告了在预留验证集（holdout）上的独立评估结果。该验证集包含7,949篇源文档和5,522条查询，与训练集（60,592篇文档）完全独立。值得说明的是，holdout的文档规模远小于训练集（8K vs 60K），因此检索难度较低，标准BM25基线（R@10=0.970）本身已处于较高水平。在此情况下，分段方法仍能取得一致的提升（R@10 +2.5%, MRR +7.5%），表明方法在未见数据上具有良好的泛化能力。训练集与holdout评估的文档规模差异也说明，检索性能与语料库大小高度相关——在更大规模的语料库上，分段方法的相对优势可能更加显著，因为多源信号稀释问题在更大规模语料中更为突出。
+表4报告了在预留验证集（holdout, 5,522条查询, 7,949篇文档）上的独立评估结果，使用seg_compare.py脚本生成（命令：--corpus data/pan25_retrieval/holdout/corpus.jsonl --queries data/pan25_retrieval/holdout/queries.jsonl --qrels data/pan25_retrieval/holdout/qrels.txt），运行日期2026-05-24，评估器使用compute_metrics函数（支持多相关文档的统一指标计算）。该验证集包含7,949篇源文档和5,522条查询，与训练集（60,592篇文档）完全独立。值得说明的是，holdout的文档规模远小于训练集（8K vs 60K），因此检索难度较低，标准BM25基线（R@10=0.970）本身已处于较高水平。在此情况下，分段方法仍能取得一致的提升（R@10 +2.5%, MRR +7.5%），表明方法在未见数据上具有良好的泛化能力。训练集与holdout评估的文档规模差异也说明，检索性能与语料库大小高度相关——在更大规模的语料库上，分段方法的相对优势可能更加显著，因为多源信号稀释问题在更大规模语料中更为突出。
 
 
 ### 4.3 结果分析
@@ -171,7 +171,7 @@ S(c) ≈ Σ_{t∈Top-50(c)} |posting(t)| ≈ 50 × 30,000 = 1,500,000
 
 (2) MRR的提升幅度最大。在所有指标中，MRR的相对提升幅度最为显著（+17%至+21%）。这一现象表明，覆盖率加权投票机制能有效地将真实源文档从较低的排名位置"推"到前列。可以设想：标准BM25可能将真实源文档排在5-10名的位置（因多源信号稀释），而分段投票通过多段一致性信号将其提升至1-3名。MRR对排名的倒数加权特性使得这种"推顶"效应得到充分体现。
 
-(3) R@100趋近理论上限。分段方法的R@100在两个样本上分别达到0.991和0.991，说明源检索的召回率已接近饱和。考虑到语料库规模（60K篇文档）和查询难度，这一召回水平意味着源检索阶段已不再是整个抄袭检测流水线的瓶颈——剩余的错误案例（约1%）需要在文本对齐阶段进行精细化处理。
+(3) R@100趋近理论上限。分段方法的R@100在两个样本上分别达到0.991和0.991，说明源检索的召回率已达到较高水平。考虑到语料库规模（60K篇文档）和查询难度，这一召回水平意味着源检索阶段已不再是整个抄袭检测流水线的瓶颈——剩余的错误案例（约1%）需要在文本对齐阶段进行精细化处理。
 
 (4) 标准BM25的跨样本波动 vs 分段方法的鲁棒性。在1,200查询样本上，标准BM25的R@10（0.883）显著低于800查询样本上的结果（0.920），差异达-4.0%。这一波动可能源于1,200查询样本中包含了更多长文本/多源合成案例。然而，分段方法的R@10在两个样本上几乎一致（0.970 vs 0.969），波动仅为0.1%。这表明分段方法对查询分布的变异性具有更强的鲁棒性。
 
@@ -210,7 +210,7 @@ S(c) ≈ Σ_{t∈Top-50(c)} |posting(t)| ≈ 50 × 30,000 = 1,500,000
 
 ## 6 结论（Conclusion）
 
-本文针对生成式抄袭检测中的源检索任务，分析了传统文档级查询范式在多源合成场景下的信号稀释问题，并提出了一种基于查询分段溯源建模的检索方法。该方法通过三个核心步骤——段落级查询分段、独立分段检索和覆盖率加权源投票——将多源溯源问题分解为多个独立的单源检索子问题，并通过对各段结果的联合聚合重建完整的溯源图。实验结果表明，该方法在PAN26评测数据的两个独立样本上均一致且显著地优于标准BM25基线：R@10达到0.970级别，MRR达到0.909级别，相对提升幅度高达17%至21%。该方法实现轻量化（仅需numpy和Python标准库），无需GPU或预训练语言模型，易于在实际评测平台中部署和应用。
+本文针对生成式抄袭检测中的源检索任务，分析了传统文档级查询范式在多源合成场景下的信号稀释问题，并提出了一种基于查询分段溯源建模的检索方法。该方法通过三个核心步骤——段落级查询分段、独立分段检索和覆盖率加权源投票——将多源溯源问题分解为多个独立的单源检索子问题，并通过对各段结果的联合聚合重建完整的溯源图。实验结果表明，该方法在PAN25-to-PAN26 开发数据的两个独立样本上均一致且显著地优于标准BM25基线：R@10达到0.970级别，MRR达到0.909级别，相对提升幅度高达17%至21%。该方法实现轻量化（仅需numpy和Python标准库），无需GPU或预训练语言模型，易于在实际评测平台中部署和应用。
 
 未来工作方向包括：(1) 探索基于章节标题（如Introduction、Method、Results等）的语义分段策略以替代纯段落分段，进一步提升分段的语义准确性；(2) 引入稠密检索模型（如E5）增强对高度改写段落的语义匹配能力，并与本文的BM25分段方法形成互补融合；(3) 将分段检索产生的溯源图结构直接输入至文本对齐阶段，实现源检索与抄袭定位的紧密耦合，构建端到端的可解释溯源检测流水线；(4) 在PAN14跨域数据集上进行泛化性验证，评估方法在不同领域和不同年代文本上的迁移能力。
 
@@ -226,15 +226,13 @@ This work is supported by the National Social Science Foundation of China (24BYY
 
 [2] Bevendorff J, Dementieva D, Fröbe M, et al. Overview of PAN 2025: Generative AI Detection, Multilingual Text Detoxification, Multi-author Writing Style Analysis, and Generative Plagiarism Detection - Extended Abstract[C]//Proceedings of the 47th European Conference on Information Retrieval (ECIR 2025). Springer LNCS, Vol. 15576, 2025: 434-441.
 
-[3] Potthast M, Gollub T, Hagen M, et al. Overview of the 6th International Competition on Plagiarism Detection[C]//Working Notes of CLEF 2014. CEUR Workshop Proceedings, Vol. 1180, 2014: 975-997.
+[3] Potthast M, Hagen M, Beyer A, Busse M, Tippmann M, Rosso P, Stein B. Overview of the 6th International Competition on Plagiarism Detection[C]//Working Notes of CLEF 2014. CEUR Workshop Proceedings, Vol. 1180, 2014: 845-876.
 
 [4] Stein B, Lipka N, Prettenhofer P. Intrinsic Plagiarism Analysis[J]. Language Resources and Evaluation, 2011, 45(1): 63-82.
 
 [5] Alzahrani S M, Salim N, Abraham A. Understanding Plagiarism Linguistic Patterns, Textual Features, and Detection Methods[J]. IEEE Transactions on Systems, Man, and Cybernetics, Part C, 2012, 42(2): 133-149.
 
-[6] Fröbe M, Bevendorff J, Gienapp L, et al. The Information Retrieval Experiment Platform (TIRA)[J]. ACM SIGIR Forum, 2023, 57(2): 1-10.
-
-[7] Potthast M, Hagen M, Beyer A, et al. Overview of the 6th International Competition on Plagiarism Detection[C]//CLEF 2014 Evaluation Labs and Workshop, Working Notes. CEUR-WS, 2014.
+[6] Fröbe M, Bevendorff J, Gienapp L, et al. The Information Retrieval Experiment Platform (TIRA)[C]//Proceedings of the 46th International ACM SIGIR Conference (SIGIR 2023). ACM, 2023: 3180-3190.
 
 [7] Robertson S, Zaragoza H. The Probabilistic Relevance Framework: BM25 and Beyond[J]. Foundations and Trends in Information Retrieval, 2009, 3(4): 333-389.
 
