@@ -95,7 +95,7 @@ def main():
             '然后通过覆盖率加权投票（coverage-weighted voting）机制聚合各段结果，构建显式的溯源图（provenance graph）。'
             '本文进一步提出了一套针对分段检索的性能优化策略，包括最大文档频率阈值过滤（max_df）、'
             '查询词数量限制以及基于堆排序的高效Top-K提取，将分段检索速度提升约20倍。'
-            '在PAN26评测数据的800条和1,200条查询样本上，该方法在所有评价指标上均显著优于标准BM25基线：'
+            '在开发数据的800条和1,200条查询样本上，该方法在所有评价指标上均显著优于标准BM25基线：'
             'R@10分别达到0.970和0.969（基线为0.920和0.883），MRR分别达到0.909和0.909（基线为0.777和0.753），'
             '相对提升幅度为17%至21%。该方法仅依赖numpy和Python标准库，无需GPU或预训练语言模型，'
             '已成功部署为TIRA评测平台的Docker提交。')
@@ -122,7 +122,7 @@ def main():
             'that maps each part of the suspicious document to its likely source. We further introduce performance '
             'optimizations for segment-level retrieval, including maximum document frequency thresholding, query '
             'term limitation, and heap-based top-K extraction, achieving a 20x speedup. Experiments on 800 and '
-            '1,200 query samples from the PAN26 benchmark show consistent improvements over standard BM25 across '
+            '1,200 query samples from the development data show consistent improvements over standard BM25 across '
             'all four evaluation metrics: R@10 reaches 0.970 (baseline: 0.920) and MRR reaches 0.909 (baseline: '
             '0.777), representing relative gains of 17-21%. The method is lightweight — requiring only numpy and '
             'the Python standard library — and has been successfully deployed as a Docker submission to TIRA.')
@@ -167,7 +167,7 @@ def main():
 
     p(doc, '本文的主要贡献包括：（1）提出了一种显式建模多源抄袭溯源结构的轻量化检索方法，无需GPU或'
             '预训练语言模型；（2）设计了一套针对分段BM25检索的性能优化策略，将分段检索速度提升约20倍；'
-            '（3）在PAN26评测数据集的两个独立样本上进行了严格验证，证明了方法的有效性和稳定性；'
+            '（3）在两个独立采样验证集上进行了严格验证，证明了方法的有效性和稳定性；'
             '（4）已成功将方法部署为TIRA评测平台[6]的Docker提交。')
 
     # ====== 2. RELATED WORK ======
@@ -296,14 +296,19 @@ def main():
     heading(doc, '4.1 实验设置', level=2)
 
     heading(doc, '4.1.1 数据集', level=3)
-    p(doc, '实验采用PAN@CLEF 2026生成式抄袭检测评测任务的训练数据集。该数据集包含：(1) 源文档语料库，'
-            '共60,592篇学术文档文本（来自ClueWeb09），平均文档长度为11,765个词元；(2) 可疑文档集合，'
-            '共42,444篇LLM生成的抄袭文本；(3) 查询-文档相关性标注（qrels），共43,140条。数据集来源于'
-            'PAN 2025评测数据的PAN26格式转换版本。')
-    p(doc, '为高效验证方法的有效性，从42,444条查询中采用固定随机种子（seed=20260520）进行简单随机采样，'
-            '获得两个独立验证子集：800条查询子集和1,200条查询子集。两个子集在查询长度分布上与全量数据集'
-            '一致，确保验证结果的代表性。其中，800条查询子集用于submit_pan26.py精确代码验证（即TIRA提交'
-            '版本），1,200条查询子集用于seg_compare.py独立评估脚本验证。')
+    p(doc, ('实验数据来源于PAN 2025生成式抄袭检测评测数据的PAN26格式转换版本。'
+            'PAN 2025评测[1]中，该任务侧重文本对齐（text alignment）；PAN 2026评测[1]重新聚焦于源检索'
+            '（source retrieval）阶段，两个评测的任务定义和评价体系不完全相同。本文的开发和验证全部基于'
+            'PAN25转换数据，PAN26官方仅提供spot-check（4条查询）和test（无公开qrels）用于格式自检和正式'
+            '提交。数据集包含：(1) 源文档语料库，共60,592篇学术文档文本（来自ClueWeb09），平均文档长度为'
+            '11,765个词元；(2) 可疑文档集合，共42,444篇LLM生成的抄袭文本（训练集）+ 5,522篇holdout；'
+            '(3) 查询-文档相关性标注（qrels），共43,140条。部分查询关联多个相关源文档，评测时使用支持'
+            '多相关文档的评估器。'))
+    p(doc, ('为高效验证方法的有效性，从42,444条训练查询中采用固定随机种子（seed=20260520）进行简单随机'
+            '采样，获得两个独立验证子集：800条查询子集和1,200条查询子集。两个子集在查询长度分布上与全量'
+            '数据集一致，确保验证结果的代表性。其中，800条查询子集用于submit_pan26.py精确代码验证'
+            '（即TIRA提交版本），1,200条查询子集用于seg_compare.py独立评估脚本验证。此外，所有核心实验'
+            '在holdout集（5,522条查询）上进行了独立复核，以确保方法在未见数据上的泛化能力。'))
 
     heading(doc, '4.1.2 数据预处理与超参数', level=3)
     p(doc, '所有文本经过以下预处理步骤：(1) 小写化；(2) 使用正则表达式[a-z0-9]+提取词元；(3) 构建倒排'
@@ -329,7 +334,7 @@ def main():
 
     heading(doc, '4.2 实验结果', level=2)
 
-    p(doc, ('表1给出了三种方法在全量训练集（42,444条查询）上的整体性能对比。标准BM25作为本文基线，'
+    p(doc, ('表1给出了三种方法在开发集训练部分（42,444条查询）上的整体性能对比。标准BM25作为本文基线，'
             '取得了R@10=0.920、MRR=0.786的性能；E5 Chunking通过稠密语义补盲将R@10提升至0.983（+6.9%），'
             '但该方法需要加载E5-base-v2模型（约440MB参数），增加了部署复杂度。'
             '本文提出的分段溯源建模方法在完全不依赖深度学习模型的前提下，'
@@ -339,7 +344,7 @@ def main():
             '针对性解决能力。'),
        )
 
-    add_table(doc, '表1  全量训练集上的各方法性能对比（42,444条查询）',
+    add_table(doc, '表1  开发集训练部分上的各方法性能对比（42,444条查询）',
               ['方法', 'R@10', 'R@100', 'nDCG@10', 'MRR', '模型依赖'],
               [('标准BM25', '0.9196', '0.9769', '0.8184', '0.7856', '无（仅numpy）'),
                ('标准BM25 + Query Decomp', '0.9317', '0.9890', '0.8274', '0.7937', '无（仅numpy）'),
