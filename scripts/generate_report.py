@@ -74,7 +74,7 @@ def main():
     aff = doc.add_paragraph()
     aff.alignment = WD_ALIGN_PARAGRAPH.CENTER
     aff.paragraph_format.space_after = Pt(2)
-    run = aff.add_run('1. [学校名称] [学院名称], [城市] [邮编]')
+    run = aff.add_run('1. 佛山大学 [学院名称], 佛山 528000')
     run.font.name = '宋体'
     run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
     run.font.size = Pt(9)
@@ -82,7 +82,7 @@ def main():
     aff2 = doc.add_paragraph()
     aff2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     aff2.paragraph_format.space_after = Pt(2)
-    run = aff2.add_run('2. 通讯作者，韩中元，[邮箱待填写]')
+    run = aff2.add_run('通讯作者邮箱：wangyi0187@icloud.com')
     run.font.name = '宋体'
     run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
     run.font.size = Pt(9)
@@ -90,7 +90,7 @@ def main():
     email = doc.add_paragraph()
     email.alignment = WD_ALIGN_PARAGRAPH.CENTER
     email.paragraph_format.space_after = Pt(10)
-    run = email.add_run('[通讯作者邮箱，请填写]')
+    run = email.add_run('E-mail: wangyi0187@icloud.com')
     run.font.name = '宋体'
     run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
     run.font.size = Pt(9)
