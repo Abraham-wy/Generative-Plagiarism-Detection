@@ -16,7 +16,7 @@ PAN@CLEF 2026生成式抄袭检测评测任务旨在从大规模源文档语料�
 
 关键词：生成式抄袭检测；源检索；查询分段；溯源建模；BM25；覆盖率投票；段落切分
 
-数据来源说明：本文的实验数据来源于PAN 2025评测数据的PAN26格式转换版本。PAN 2026官方提供spot-check（4条查询，格式自检）、主测试集（main test, 结果已由TIRA发布）和secondary dataset（结果待发布）。所有训练、采样验证和holdout验证均在PAN25转换数据上完成。所有训练、采样验证和holdout验证均在PAN25转换数据上完成。
+数据来源说明：本文的实验数据来源于PAN 2025评测数据的PAN26格式转换版本。PAN 2026官方提供spot-check（4条查询，格式自检）、主测试集（main test, 结果已由TIRA发布）和secondary dataset（结果待发布）。所有训练、采样验证和holdout验证均在PAN25转换数据上完成。
 
 
 ## Abstract
