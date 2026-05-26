@@ -16,7 +16,7 @@ PAN@CLEF 2026生成式抄袭检测评测任务旨在从大规模源文档语料�
 
 关键词：生成式抄袭检测；源检索；查询分段；溯源建模；BM25；覆盖率投票；段落切分
 
-数据来源说明：本文的实验数据来源于PAN 2025评测数据的PAN26格式转换版本。PAN 2026官方仅提供spot-check（4条查询，用于格式自检）和test（无公开qrels，用于正式提交）数据集。所有训练、采样验证和holdout验证均在PAN25转换数据上完成。
+数据来源说明：本文的实验数据来源于PAN 2025评测数据的PAN26格式转换版本。PAN 2026官方提供spot-check（4条查询，格式自检）、主测试集（main test, 结果已由TIRA发布）和secondary dataset（结果待发布）。所有训练、采样验证和holdout验证均在PAN25转换数据上完成。所有训练、采样验证和holdout验证均在PAN25转换数据上完成。
 
 
 ## Abstract
@@ -241,7 +241,7 @@ This work is supported by the National Social Science Foundation of China (24BYY
 
 [1] Greiner-Petter A, Fröbe M, Wahle J P, et al. Overview of the Plagiarism Detection Task at PAN 2025[C]//Proceedings of the 16th International Conference of the CLEF Association (CLEF 2025). CEUR Workshop Proceedings, Vol. 4038, 2025: 3575-3585.
 
-[2] Bevendorff J, Dementieva D, Fröbe M, et al. Overview of PAN 2025: Generative AI Detection, Multilingual Text Detoxification, Multi-author Writing Style Analysis, and Generative Plagiarism Detection - Extended Abstract[C]//Proceedings of the 47th European Conference on Information Retrieval (ECIR 2025). Springer LNCS, Vol. 15576, 2025: 434-441.
+[2] Bevendorff J, Dementieva D, Fröbe M, et al. Overview of PAN 2025: Generative AI Detection, Multilingual Text Detoxification, Multi-author Writing Style Analysis, and Generative Plagiarism Detection[C]//Proceedings of the 47th European Conference on Information Retrieval (ECIR 2025). Springer LNCS, Vol. 15576, 2025: 434-441.
 
 [3] Potthast M, Hagen M, Beyer A, Busse M, Tippmann M, Rosso P, Stein B. Overview of the 6th International Competition on Plagiarism Detection[C]//Working Notes of CLEF 2014. CEUR Workshop Proceedings, Vol. 1180, 2014: 845-876.
 
@@ -249,13 +249,13 @@ This work is supported by the National Social Science Foundation of China (24BYY
 
 [5] Alzahrani S M, Salim N, Abraham A. Understanding Plagiarism Linguistic Patterns, Textual Features, and Detection Methods[J]. IEEE Transactions on Systems, Man, and Cybernetics, Part C, 2012, 42(2): 133-149.
 
-[6] Fröbe M, Bevendorff J, Gienapp L, et al. The Information Retrieval Experiment Platform (TIRA)[C]//Proceedings of the 46th International ACM SIGIR Conference (SIGIR 2023). ACM, 2023: 3180-3190.
+[6] Fröbe M, Reimer J H, MacAvaney S, Deckers N, Reich S, Bevendorff J, Stein B, Hagen M, Potthast M. The Information Retrieval Experiment Platform (TIRA)[C]//Proceedings of the 46th International ACM SIGIR Conference (SIGIR 2023). ACM, 2023: 3180-3190. DOI: 10.1145/3539618.3591888.
 
 [7] Robertson S, Zaragoza H. The Probabilistic Relevance Framework: BM25 and Beyond[J]. Foundations and Trends in Information Retrieval, 2009, 3(4): 333-389.
 
 [8] Reimers N, Gurevych I. Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks[C]//Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing (EMNLP-IJCNLP). ACL, 2019: 3982-3992.
 
-[9] Wang L, Yang N, Huang X, et al. Text Embeddings by Weakly-Supervised Contrastive Pre-training[C]//Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing (EMNLP). ACL, 2024.
+[9] Wang L, Yang N, Huang X, Jiao B, Yang L, Jiang D, Majumder R, Wei F. Text Embeddings by Weakly-Supervised Contrastive Pre-training[EB/OL]. arXiv:2212.03533, 2022.
 
 [10] Karpukhin V, Oguz B, Min S, et al. Dense Passage Retrieval for Open-Domain Question Answering[C]//Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP). ACL, 2020: 6769-6781.
 
@@ -304,7 +304,7 @@ This work is supported by the National Social Science Foundation of China (24BYY
 |------|------|------|------|------|
 | R@10 | 0.9804 | 0.9947 | +0.0143 | +1.5% |
 | R@100 | 0.9874 | 0.9969 | +0.0095 | +1.0% |
-| nDCG@10 | 0.9323 | 0.9770* | -- | -- |
+| nDCG@10 | 0.9323 | 0.9770 | -- | -- |
 | MRR | 0.9174 | 0.9724 | +0.0550 | +6.0% |
 | 分段率 | - | 99.9% (5,518/5,522) | - | - |
 
@@ -314,9 +314,9 @@ This work is supported by the National Social Science Foundation of China (24BYY
 | 分段策略 | R@10 | R@100 | nDCG@10 | MRR | 分段率 | 耗时(s) |
 |------|------|------|------|------|------|------|
 | 无分段（标准BM25） | 0.9804 | 0.9874 | 0.9323 | 0.9174 | - | 33 |
-| 段落分段（本文方法） | 0.9947 | 0.9969 | 0.9770* | 0.9724 | 99.9% | 358 |
-| 固定窗口分段 | 0.9933 | 0.9955 | 0.9740* | 0.9705 | 99.9% | 300 |
-| 语义分段（章节标题） | 0.9746 | 0.9828 | 0.9310* | 0.9195 | 51.6% | 49 |
+| 段落分段（本文方法） | 0.9947 | 0.9969 | 0.9770 | 0.9724 | 99.9% | 358 |
+| 固定窗口分段 | 0.9933 | 0.9955 | 0.9740 | 0.9705 | 99.9% | 300 |
+| 语义分段（章节标题） | 0.9746 | 0.9828 | 0.9310 | 0.9195 | 51.6% | 49 |
 
 
 **Table 6**
