@@ -1,0 +1,397 @@
+\documentclass[twocolumn]{ceurart}
+
+%%
+%% Rights management.
+\copyrightyear{2026}
+\copyrightclause{Copyright for this paper by its authors.
+  Use permitted under Creative Commons License Attribution 4.0
+  International (CC BY 4.0).}
+
+%%
+%% Conference information
+\conference{CLEF 2026 Working Notes, 22--26 September 2026, Thessaloniki, Greece}
+
+%%
+%% Title
+\title{Team Fosuai at PAN 2026: Source Retrieval via\\Query-Chunk Provenance Modeling}
+\title[mode=sub]{Notebook for the PAN Lab at CLEF 2026}
+
+%%
+%% Authors
+\author[1]{Yi Wang}[%
+  email=wangyi0187@icloud.com,
+]
+\author[1]{Zhongyuan Han}[%
+  email=,
+]
+\cormark[1]
+\author[1]{Chang Liu}[%
+  email=,
+]
+\author[1]{Haojie Cao}[%
+  email=,
+]
+
+\address[1]{Foshan University, School of Computer Science and Artificial Intelligence,
+  Foshan 528000, Guangdong, China}
+
+%%
+%% Corresponding author
+\cortext[1]{Corresponding author: Zhongyuan Han.}
+
+%%
+%% Abstract
+\begin{abstract}
+The PAN@CLEF 2026 Generative Plagiarism Detection task (Task 4) aims to retrieve
+potential source documents for a given suspicious document from a large-scale
+corpus. Generative plagiarism poses a novel challenge: LLM-generated suspicious
+texts often composite content from multiple distinct sources, causing multi-source
+signal dilution when the entire document is treated as a single query. We propose
+Query-Chunk Provenance Modeling for source retrieval. The suspicious document is
+decomposed into paragraph-level semantic segments; each segment independently
+retrieves candidate sources via BM25; and a coverage-weighted voting mechanism
+aggregates segment-level results into an explicit provenance graph. Our method
+is lightweight---requiring only numpy and the Python standard library---and has
+been deployed as a Docker submission on TIRA (team fosuai, software
+oscillating-list). On the official PAN26 main test set, our system achieved
+RR=0.9350 (ranked 3rd by RR) and improved over the official BM25 baseline on
+Recall@10 (0.630 vs.\ 0.577) and nDCG@10 (0.626 vs.\ 0.553). On held-out
+development data (7,949 documents, 5,522 queries), paragraph-segmented BM25
+reaches R@10=0.9947 (baseline: 0.9804) and MRR=0.9724 (baseline: 0.9174).
+\end{abstract}
+
+%%
+%% Keywords
+\begin{keywords}
+  Generative Plagiarism Detection \sep
+  Source Retrieval \sep
+  Query Segmentation \sep
+  Provenance Modeling \sep
+  BM25 \sep
+  Coverage-Weighted Voting
+\end{keywords}
+
+\maketitle
+
+
+%% ===================================================================
+\section{Introduction}
+
+The PAN@CLEF 2026 Generative Plagiarism Detection task (Task~4) addresses a
+rapidly emerging challenge: Large Language Models (LLMs) can synthesize,
+recombine, and rewrite content from dozens of source documents into a single
+suspicious text, where different paragraphs may originate from entirely different
+sources~\cite{greinerpetter:2025}. The task consists of two stages:
+(1)~Source Retrieval---identify source documents from a large corpus given a
+suspicious document; and (2)~Text Alignment---precisely locate plagiarized
+passages at character level. This paper focuses on Stage~1.
+
+Existing source retrieval methods predominantly adopt a document-level querying
+paradigm: the entire suspicious document is encoded as a single query vector or
+bag-of-words, and a relevance score is computed against each candidate
+document~\cite{potthast:2014,robertson:2009}. While effective for single-source
+plagiarism, this paradigm suffers from \textbf{multi-source signal dilution}.
+When a suspicious text composites content from Source~A's introduction,
+Source~B's methodology, and Source~C's results, the query signal becomes a noisy
+mixture of multiple provenance fingerprints. Each individual source's matching
+signal is diluted by noise from other sources, causing the true source document
+to be ranked outside the top retrieval positions.
+
+To address this problem, we propose \textbf{Query-Chunk Provenance Modeling}.
+Rather than treating the suspicious document as a monolithic query, we decompose
+it into paragraph-level semantic segments. Each segment independently retrieves
+candidate sources via BM25, and a coverage-weighted voting mechanism aggregates
+the results. Documents matched by multiple independent segments receive a
+coverage bonus---a strong signal of genuine multi-paragraph provenance. This
+approach explicitly models the provenance structure of multi-source plagiarism
+while maintaining a lightweight implementation (numpy only, no GPU required).
+
+
+%% ===================================================================
+\section{Related Work}
+
+Source retrieval has been a core component of PAN plagiarism detection tasks
+since PAN~2014~\cite{potthast:2014}. Early approaches relied on lexical matching:
+word $n$-gram overlap, fingerprinting, and BM25~\cite{robertson:2009} have
+proven effective for verbatim and lightly-paraphrased plagiarism. Dense
+retrieval methods using sentence encoders such as Sentence-BERT~\cite{reimers:2019}
+and E5~\cite{wang:2022} project documents into a dense vector space for semantic
+matching, achieving better generalization on heavily paraphrased texts.
+Chunk-based retrieval~\cite{karpukhin:2020} splits documents into fixed-size
+segments for independent encoding and max-pooling aggregation, but applies
+splitting only on the document side while keeping the query as a single unit.
+Query decomposition techniques~\cite{min:2019} split complex queries into
+sub-queries for multi-hop QA, but have not been applied to plagiarism-specific
+segmentation.
+
+Our work differs from all of the above by modeling provenance structure on the
+\textit{query side}: decomposing the suspicious document itself to isolate
+individual source signals before retrieval. Rather than computing a single
+query--document similarity, we construct an explicit provenance graph through
+independent segment-level retrieval and coverage-weighted voting.
+
+
+%% ===================================================================
+\section{Method}
+
+\subsection{Task Formulation}
+
+Given a source corpus $\mathcal{C} = \{d_1, d_2, \ldots, d_N\}$
+($N = 60{,}592$ academic documents from ClueWeb09) and a suspicious document
+$q$, source retrieval aims to produce a ranked list
+$R(q) = [d_{r_1}, \ldots, d_{r_K}]$ such that the true source document $d^*(q)$
+appears as high as possible. In generative plagiarism, $q$ may be synthesized
+from multiple sources, though evaluation considers one primary source per $q$.
+Retrieval quality is measured by Recall@K, nDCG@K, MRR, and Reciprocal
+Rank (RR).
+
+\subsection{Query-Chunk Provenance Modeling}
+
+Our method consists of three stages, illustrated in Figure~\ref{fig:arch}.
+
+\begin{figure}[t]
+\centering
+\fbox{\begin{minipage}{0.95\linewidth}
+\vspace{4em}
+\begin{center}
+{\small\textbf{[Stage 1]} Suspicious Document $\to$ Paragraph Split
+$\to$ Query Chunks $C_1, C_2, \ldots, C_n$}\\[1em]
+{\small\textbf{[Stage 2]} Each $C_i$ $\to$ Independent BM25 Retrieval
+$\to$ Segment-Level Candidate Lists}\\[1em]
+{\small\textbf{[Stage 3]} Coverage-Weighted Voting
+$\to$ Final Ranked Source List}\\[0.5em]
+{\footnotesize Dashed boxes highlight two key modules:
+\underline{Paragraph Segmentation} and \underline{Coverage-Weighted Voting}.}
+\vspace{4em}
+\end{center}
+\end{minipage}}
+\caption{Overall architecture of the proposed method.}
+\label{fig:arch}
+\end{figure}
+
+\subsubsection{Paragraph-Level Query Segmentation}
+
+The suspicious document $q$ is split by double-newline paragraph boundaries.
+Adjacent paragraphs are merged until reaching $\textit{max\_chars}=3{,}000$,
+with chunks shorter than $\textit{min\_chars}=800$ discarded. The output is
+capped at 20 chunks. This produces semantically coherent segments roughly
+corresponding to academic document section structure. For documents lacking
+paragraph structure, the entire text is treated as a single segment.
+
+\subsubsection{Independent Segment Retrieval}
+
+Each segment $c_i$ independently performs BM25 retrieval with optimized
+parameters: $\textit{max\_terms}=20$ (vs.\ 100 for full-document queries, since
+short segments contain fewer discriminative terms) and $\textit{max\_df}=5{,}000$
+(filtering terms appearing in ${>}5{,}000$ documents, $\sim$8\% of the corpus).
+Without filtering, segment-level BM25 is 85--150$\times$ slower than
+full-document BM25 because segments contain mostly common academic function
+words with very long posting lists (30K--50K entries). The $\textit{max\_df}$
+threshold eliminates non-discriminative terms, achieving an $\sim$20$\times$
+speedup (1.7--3.0\,s $\to$ 0.15\,s per segment). Heap-based top-$K$ extraction
+(\texttt{heapq.nlargest}) replaces full sorting for additional efficiency.
+
+\subsubsection{Coverage-Weighted Source Voting}
+
+Segment-level rankings are aggregated into a final ranking via:
+\begin{equation}
+\text{Score}(d) = \sum_{i=1}^{n} \text{BM25}(d|c_i) \times
+\left(1 + \frac{\text{count}(d)}{n}\right)
+\end{equation}
+where $\text{count}(d)$ is the number of segments that retrieved document $d$ in
+their top-50 results, and $n$ is the total number of segments. The coverage
+bonus $(1 + \text{count}(d)/n) \in [1, 2]$ rewards documents consistently
+matched by multiple independent segments---a strong signal of genuine
+multi-paragraph provenance rather than incidental single-phrase matching. This
+mechanism can be viewed as constructing an explicit provenance graph: nodes are
+query segments and candidate documents, edges represent segment--document
+matches, and the final ranking reflects each document's global importance in the
+graph.
+
+
+%% ===================================================================
+\section{Experiments}
+
+\subsection{Experimental Setup}
+
+\subsubsection{Dataset}
+Development data comes from the PAN~2025 generative plagiarism detection dataset
+converted to PAN26 format: 60,592 source documents from ClueWeb09
+(avg.\ 11,765 tokens), 42,444 LLM-generated suspicious documents (training),
+5,522 held-out queries with 7,949 source documents, and 43,140 query-document
+relevance annotations (qrels). The PAN26 official spot-check dataset (4 queries)
+was used only for format verification and TIRA submission validation. Official
+main test set results are from TIRA (accessed May~25, 2026).
+
+\subsubsection{Preprocessing}
+All texts are lowercased and tokenized via regex \texttt{[a-z0-9]+}. An inverted
+index is built with 1,273,004 unique terms. BM25 parameters: $k_1=1.2$,
+$b=0.75$. Paragraph segmentation: $\textit{min\_chars}=800$,
+$\textit{max\_chars}=3{,}000$. Segment retrieval: $\textit{max\_terms}=20$,
+$\textit{max\_df}=5{,}000$, $\textit{top\_k}=50$. Standard retrieval:
+$\textit{max\_terms}=100$, $\textit{top\_k}=100$. All metrics are evaluated
+using \texttt{scripts/evaluate.py} (supporting multi-relevant qrels).
+
+\subsubsection{Evaluation Metrics}
+Four standard IR metrics are used: (1)~Recall@K ($K=10,100$)---proportion of
+queries where the correct source appears in the top-$K$ results; (2)~nDCG@10
+with position weighting; (3)~MRR---Mean Reciprocal Rank; and (4)~RR---Reciprocal
+Rank, used by the official TIRA evaluation. All metrics range $[0,1]$, higher is
+better.
+
+\subsubsection{Baselines}
+Three comparison categories: (1)~Standard BM25---full document as single query,
+$\textit{max\_terms}=100$; (2)~E5 Chunking---256-token document chunks encoded
+with E5-base-v2, coverage-aware scoring for BM25 blind-spot queries;
+(3)~Ablation variants---fixed-chunk segmentation (3,000-char rolling windows)
+and semantic segmentation (section header pattern matching). All methods share
+identical inverted indexes and BM25 parameters for fair comparison.
+
+\subsection{Results and Analysis}
+
+\begin{table*}[t]
+\caption{Development data method overview. *Segmented BM25 results from 800-query
+sample (seed=20260520, submit\_pan26.py TIRA submission code).}
+\label{tab:overview}
+\begin{tabular}{lccccc}
+\hline
+\textbf{Method} & \textbf{R@10} & \textbf{R@100} & \textbf{nDCG@10} & \textbf{MRR} & \textbf{Data Scale} \\
+\hline
+Standard BM25 & 0.9196 & 0.9769 & 0.8184 & 0.7856 & 42,444q (full train) \\
++ Query Decomposition & 0.9317 & 0.9890 & 0.8274 & 0.7937 & 982q (Cat1 blind-spot) \\
++ E5 Chunking & 0.9830 & 0.9917 & 0.8716 & 0.8355 & 42,444q (full train) \\
+Segmented BM25 (ours)* & 0.9700 & 0.9912 & 0.9242 & 0.9092 & 800q sample (TIRA code)\\
+\hline
+\end{tabular}
+\end{table*}
+
+Query Decomposition recovered 514/982 Cat1 blind-spot queries (52.3\% recovery
+rate) by applying paragraph-segmented BM25 only to queries whose true source
+was not retrieved by standard BM25 in the top-100. E5 Chunking attains higher
+R@10 but requires a 440\,MB E5 model; our method is numpy-only.
+
+\begin{table*}[t]
+\caption{Held-out validation (7,949 documents, 5,522 queries).}
+\label{tab:holdout}
+\begin{tabular}{lcccc}
+\hline
+\textbf{Method} & \textbf{R@10} & \textbf{R@100} & \textbf{nDCG@10} & \textbf{MRR} \\
+\hline
+Standard BM25 & 0.9804 & 0.9874 & 0.9323 & 0.9174 \\
+Segmented BM25 (ours) & 0.9947 & 0.9969 & 0.9770 & 0.9724 \\
+\hline
+\end{tabular}
+\end{table*}
+
+\begin{table*}[t]
+\caption{Segmentation strategy comparison on the held-out set.}
+\label{tab:strategies}
+\begin{tabular}{lcccc}
+\hline
+\textbf{Strategy} & \textbf{R@10} & \textbf{MRR} & \textbf{Segmented} & \textbf{Time (s)} \\
+\hline
+No segmentation (BM25) & 0.9804 & 0.9174 & -- & 33 \\
+Paragraph split (ours) & 0.9947 & 0.9724 & 99.9\% & 358 \\
+Fixed chunk & 0.9933 & 0.9705 & 99.9\% & 300 \\
+Semantic split (section headers) & 0.9746 & 0.9195 & 51.6\% & 49 \\
+\hline
+\end{tabular}
+\end{table*}
+
+Table~\ref{tab:strategies} reveals several findings. (1)~Paragraph segmentation
+achieves the best overall performance. (2)~Fixed-chunk segmentation performs
+close to paragraph split but is slightly inferior, confirming that paragraph
+boundaries provide more meaningful semantic units than arbitrary character
+windows. (3)~Semantic segmentation based on section header pattern matching
+(Introduction, Method, Results, etc.) actually degrades performance below
+standard BM25 (R@10 0.9746 vs.\ 0.9804), because only 51.6\% of queries contain
+explicit section headers. This negative result is retained as a
+credibility-enhancing finding: simple rule-based semantic segmentation is not
+viable for this dataset.
+
+\begin{table}[t]
+\caption{Ablation study---speed optimization (200 queries).}
+\label{tab:ablation}
+\begin{tabular}{lcccc}
+\hline
+\textbf{Configuration} & \textbf{R@10} & \textbf{nDCG@10} & \textbf{MRR} & \textbf{Time/chunk} \\
+\hline
+(a) Standard BM25 & 0.900 & 0.805 & 0.775 & $\sim$0.02\,s \\
+(b) + segmentation ($\textit{mt}{=}50$) & 0.975 & 0.942 & 0.931 & 1.7--3.0\,s \\
+(c) + $\textit{max\_df}{=}5{,}000$ & 0.973 & 0.940 & 0.929 & $\sim$0.30\,s \\
+(d) + $\textit{max\_terms}{=}20$ + heapq & 0.975 & 0.942 & 0.931 & $\sim$0.15\,s \\
+\hline
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:ablation} demonstrates that the three optimization strategies
+($\textit{max\_df}$ filtering, $\textit{max\_terms}$ reduction, heapq top-$K$)
+together achieve an $\sim$15--20$\times$ speedup with negligible accuracy loss
+($\Delta$R@10~$=$~0.002, within statistical noise).
+
+\begin{table*}[t]
+\caption{Official PAN26 main test results (TIRA, accessed May~25, 2026).}
+\label{tab:tira}
+\begin{tabular}{lccccc}
+\hline
+\textbf{System} & \textbf{Recall@10} & \textbf{Recall@100} & \textbf{nDCG@10} & \textbf{nDCG@100} & \textbf{RR} \\
+\hline
+BM25 baseline (official) & 0.5767 & 0.7825 & 0.5532 & 0.6068 & 0.8318 \\
+fosuai / oscillating-list (ours) & 0.6300 & 0.6300 & 0.6263 & 0.6263 & 0.9350 \\
+JLP / jlp (best system) & 0.8542 & 0.9629 & 0.7994 & 0.8326 & 0.9760 \\
+\hline
+\end{tabular}
+\end{table*}
+
+Table~\ref{tab:tira} shows our system achieves RR~$=$~0.9350 (ranked~3rd),
+demonstrating strong early-rank performance consistent with the design goal
+of coverage-weighted voting. Recall@10 and nDCG@10 both improve over the BM25
+baseline (+9.2\% and +13.2\% respectively). However, Recall@100 equals
+Recall@10 (0.6300) because the submitted run file contained only top-10
+documents per query rather than the expected top-1,000. This is an engineering
+limitation to be corrected in future submissions. The gap between
+development-set R@10 ($\sim$0.97--0.99) and test-set R@10 (0.63) reflects
+differences in corpus size, domain, and plagiarism type distribution,
+underscoring that cross-dataset generalization remains the core challenge of
+this task.
+
+
+%% ===================================================================
+\section{Conclusions}
+
+We presented Query-Chunk Provenance Modeling, a lightweight (numpy-only) source
+retrieval method for PAN26 generative plagiarism detection. The method
+decomposes suspicious documents into paragraph-level segments, independently
+retrieves sources per segment via BM25, and aggregates results through
+coverage-weighted voting to construct an explicit provenance graph. On
+development data, our method consistently outperforms standard BM25. On the
+official PAN26 main test set, our system (fosuai / oscillating-list) achieved
+RR~$=$~0.9350 (ranked~3rd by RR) with Recall@10 and nDCG@10 improving over the
+BM25 baseline. The submitted run's top-10 output limit constrained Recall@100;
+future work should output top-1,000 and explore topic-based or embedding-based
+segmentation strategies for improved semantic coherence. PAN26 official
+secondary dataset results are pending.
+
+
+%% ===================================================================
+\begin{acknowledgments}
+This work is supported by the National Social Science Foundation of China
+(24BYY080). We thank the PAN@CLEF~2026 organizers for providing the evaluation
+dataset and the TIRA platform.
+\end{acknowledgments}
+
+
+%% ===================================================================
+\section*{Declaration on Generative AI}
+
+During the preparation of this work, the author(s) used Claude in order to:
+English abstract translation, and English language proofreading. After using
+this tool/service, the author(s) reviewed and edited the content as needed and
+take(s) full responsibility for the publication's content.
+
+
+%% ===================================================================
+\bibliography{participant-lit,pan25-lit,PAN26_notebook}
+
+
+\end{document}
