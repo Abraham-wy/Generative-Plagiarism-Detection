@@ -34,24 +34,24 @@ Our system ranked 3rd by Reciprocal Rank (RR=0.9350).
 .
 ├── Dockerfile              # TIRA submission Docker image
 ├── scripts/
-│   ├── submit_pan26.py     # TIRA entry point (main method)
-│   ├── evaluate.py         # IR evaluation (nDCG, Recall, MRR, MAP)
-│   ├── bm25_index.py       # BM25 inverted index construction
-│   ├── baseline_bm25.py    # Standard BM25 baseline
-│   ├── bm25_top100.py      # BM25 top-100 retrieval
-│   ├── query_segment_retrieve.py  # Query-chunk retrieval pipeline
-│   ├── run_segmentation.py        # Batch segmentation experiments
-│   ├── segmentation_eval.py       # Segmentation strategy evaluation
-│   ├── seg_compare.py             # Segmentation comparison
-│   ├── dense_encode.py     # E5 dense embedding
-│   ├── dense_retrieve.py   # Dense retrieval
-│   ├── dense_chunk.py      # E5 chunking (256-token windows)
-│   ├── query_decompose.py  # Query decomposition baseline
-│   ├── export_bm25_top100.py      # Export retrieval results
-│   ├── convert_pan25.py    # PAN25→PAN26 format conversion
-│   ├── pan26_e2e.py        # End-to-end pipeline
-│   └── ...                 # Additional experimental scripts
-└── docs/                   # Paper source files
+   ├── submit_pan26.py     # TIRA entry point (main method)
+   ├── evaluate.py         # IR evaluation (nDCG, Recall, MRR, MAP)
+   ├── bm25_index.py       # BM25 inverted index construction
+   ├── baseline_bm25.py    # Standard BM25 baseline
+   ├── bm25_top100.py      # BM25 top-100 retrieval
+   ├── query_segment_retrieve.py  # Query-chunk retrieval pipeline
+   ├── run_segmentation.py        # Batch segmentation experiments
+   ├── segmentation_eval.py       # Segmentation strategy evaluation
+   ├── seg_compare.py             # Segmentation comparison
+   ├── dense_encode.py     # E5 dense embedding
+   ├── dense_retrieve.py   # Dense retrieval
+   ├── dense_chunk.py      # E5 chunking (256-token windows)
+   ├── query_decompose.py  # Query decomposition baseline
+   ├── export_bm25_top100.py      # Export retrieval results
+   ├── convert_pan25.py    # PAN25→PAN26 format conversion
+   ├── pan26_e2e.py        # End-to-end pipeline
+   └── ...                 # Additional experimental scripts
+
 ```
 
 ## Quick Start
